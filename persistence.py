@@ -7,7 +7,8 @@ from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-PREFS_FILE = Path.home() / ".converter_prefs.json"
+PREFS_FILE       = Path.home() / ".converter_prefs.json"
+ARG_HISTORY_FILE = Path.home() / ".converter_arg_history.json"
 
 # ── Format tables ─────────────────────────────────────────────────────────────
 
@@ -39,6 +40,34 @@ def save_prefs(prefs):
         PREFS_FILE.write_text(json.dumps(prefs, indent=2))
     except Exception:
         pass
+
+# ── Arg value history ─────────────────────────────────────────────────────────
+# Stored separately so a DB rebuild never wipes it.
+# Schema: { "flag_values": {"-quality": "85", "-r": "30", ...} }
+
+def load_arg_history():
+    if ARG_HISTORY_FILE.exists():
+        try:
+            return json.loads(ARG_HISTORY_FILE.read_text())
+        except Exception:
+            pass
+    return {"flag_values": {}}
+
+def save_arg_history(history):
+    try:
+        ARG_HISTORY_FILE.write_text(json.dumps(history, indent=2))
+    except Exception:
+        pass
+
+def get_last_value(flag):
+    """Return the last used value string for a flag, or ''."""
+    return load_arg_history().get("flag_values", {}).get(flag, "")
+
+def set_last_value(flag, value):
+    """Persist the last used value for a flag."""
+    h = load_arg_history()
+    h.setdefault("flag_values", {})[flag] = value
+    save_arg_history(h)
 
 # ── Format helpers ────────────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ from scanner import (
     probe_tool, build_args_db, load_args_db, save_args_db,
     IMAGE_FORMATS, VIDEO_FORMATS, AUDIO_FORMATS,
 )
-from persistence import save_prefs
+from persistence import save_prefs, get_last_value, set_last_value
 
 
 # ── Arg value popup ───────────────────────────────────────────────────────────
@@ -50,10 +50,11 @@ class ArgValuePopup(tk.Toplevel):
         self.bind("<FocusOut>", self._on_focus_out)
 
     def _build(self):
-        flag     = self.entry_data["flag"]
-        arg_hint = self.entry_data.get("args", "")
-        desc     = self.entry_data.get("desc", "")
+        flag      = self.entry_data["flag"]
+        arg_hint  = self.entry_data.get("args", "")
+        desc      = self.entry_data.get("desc", "")
         needs_val = bool(arg_hint)
+        last_val  = get_last_value(flag)
 
         outer = tk.Frame(self, bg=th.PANEL, padx=14, pady=10)
         outer.pack(fill="both", expand=True, padx=1, pady=1)
@@ -76,20 +77,23 @@ class ArgValuePopup(tk.Toplevel):
         th.sep(outer, bg=th.BORDER).pack(fill="x", pady=(0, 8))
 
         if needs_val:
-            # Value entry row
             val_row = tk.Frame(outer, bg=th.PANEL)
             val_row.pack(fill="x")
             tk.Label(val_row, text="value:", font=th.FONT_LABEL,
                      bg=th.PANEL, fg=th.MUTED).pack(side="left")
-            self.val_var = tk.StringVar()
+            self.val_var = tk.StringVar(value=last_val)
             self.val_entry = th.entry(val_row, self.val_var, width=18)
             self.val_entry.pack(side="left", padx=(6, 8))
             self.val_entry.bind("<Return>", self._confirm)
             self.val_entry.bind("<Escape>", lambda _: self.destroy())
+
+            if last_val:
+                tk.Label(val_row, text=f"last: {last_val}",
+                         font=th.FONT_SMALL, bg=th.PANEL,
+                         fg=th.MUTED).pack(side="left")
         else:
-            # Boolean flag — no value needed, just confirm
             self.val_var   = None
-            self.val_entry = tk.Frame(outer)  # dummy so _confirm works
+            self.val_entry = tk.Frame(outer)  # dummy
 
         btn_row = tk.Frame(outer, bg=th.PANEL)
         btn_row.pack(fill="x", pady=(8, 0))
@@ -101,24 +105,25 @@ class ArgValuePopup(tk.Toplevel):
                   style="ghost", padx=8, pady=4).pack(side="left", padx=(6, 0))
 
         if needs_val:
-            hint_txt = f"Enter: confirm  ·  Esc: cancel"
-            tk.Label(btn_row, text=hint_txt, font=th.FONT_SMALL,
-                     bg=th.PANEL, fg=th.MUTED).pack(side="right")
+            tk.Label(btn_row, text="Enter: confirm  ·  Esc: cancel",
+                     font=th.FONT_SMALL, bg=th.PANEL,
+                     fg=th.MUTED).pack(side="right")
 
     def _confirm(self, _=None):
         flag  = self.entry_data["flag"]
         value = self.val_var.get().strip() if self.val_var else ""
 
-        token = flag if not value else f"{flag} {value}"
+        # Persist the value for next time
+        if value:
+            set_last_value(flag, value)
 
+        token   = flag if not value else f"{flag} {value}"
         current = self.app.extra_args_text.get("1.0", "end").strip()
-        # Avoid exact duplicate flag entries
         existing_flags = [t for t in current.split() if t.startswith("-")]
         if flag not in existing_flags:
             sep = " " if current and not current.endswith("\n") else ""
             self.app.extra_args_text.configure(state="normal")
             self.app.extra_args_text.insert("end", sep + token)
-            self.app.extra_args_text.configure(state="normal")
 
         self.destroy()
 
@@ -226,9 +231,11 @@ class ArgsReferenceDialog(tk.Toplevel):
                      pady=24).pack(anchor="w", padx=20)
 
     def _arg_row(self, parent, entry):
-        flag_str = entry["flag"]
-        if entry.get("args"):
-            flag_str += f"  {entry['args']}"
+        flag     = entry["flag"]
+        arg_hint = entry.get("args", "")
+        last_val = get_last_value(flag)
+
+        flag_str = flag + (f"  {arg_hint}" if arg_hint else "")
 
         row = tk.Frame(parent, bg=th.PANEL,
                        highlightthickness=0, pady=5, padx=12, cursor="hand2")
@@ -239,18 +246,26 @@ class ArgsReferenceDialog(tk.Toplevel):
                             width=28, cursor="hand2")
         flag_lbl.pack(side="left")
 
+        # Last-used value badge (right side, before flash)
+        self._last_val_labels = getattr(self, "_last_val_labels", {})
+        last_lbl = tk.Label(row, text=f"  {last_val}" if last_val else "",
+                            font=th.FONT_SMALL, bg=th.PANEL, fg=th.MUTED,
+                            anchor="e", width=12)
+        last_lbl.pack(side="right")
+        self._last_val_labels[flag] = last_lbl
+
+        flash = tk.Label(row, text="", font=th.FONT_LABEL,
+                         bg=th.PANEL, fg=th.SUCCESS, width=6)
+        flash.pack(side="right")
+
         desc_lbl = tk.Label(row, text=entry.get("desc", ""),
                             font=th.FONT_LABEL, bg=th.PANEL, fg=th.FG,
-                            anchor="w", justify="left", wraplength=500,
+                            anchor="w", justify="left", wraplength=440,
                             cursor="hand2")
         desc_lbl.pack(side="left", fill="x", expand=True)
 
-        flash = tk.Label(row, text="", font=th.FONT_LABEL,
-                         bg=th.PANEL, fg=th.SUCCESS, width=8)
-        flash.pack(side="right")
-
         def _click(e):
-            self._open_value_popup(entry, e.x_root, e.y_root, flash)
+            self._open_value_popup(entry, e.x_root, e.y_root, flash, last_lbl)
 
         def _hover_in(_=None):
             for w in (row, flag_lbl, desc_lbl):
@@ -267,15 +282,21 @@ class ArgsReferenceDialog(tk.Toplevel):
 
         return (row, flag_lbl, desc_lbl, entry)
 
-    def _open_value_popup(self, entry, x, y, flash_lbl):
+    def _open_value_popup(self, entry, x, y, flash_lbl, last_lbl):
         popup = ArgValuePopup(self, entry, x, y)
-        # Flash confirmation after popup closes
+        flag  = entry["flag"]
+
         def _watch():
-            self.after(200, _check)
+            self.after(150, _check)
+
         def _check():
             if not popup.winfo_exists():
+                # Refresh the last-used label on the row
+                new_val = get_last_value(flag)
+                last_lbl.configure(text=f"  {new_val}" if new_val else "")
                 flash_lbl.configure(text="+ added")
                 self.after(1000, lambda: flash_lbl.configure(text=""))
+
         _watch()
 
     def _no_db_tab(self):
