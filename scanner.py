@@ -16,7 +16,9 @@ from datetime import datetime
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
-ARGS_FILE = Path.home() / ".converter_args.json"
+# Store next to the app so it travels with the project folder
+APP_DIR   = Path(__file__).parent
+ARGS_FILE = APP_DIR / "converter_args.json"
 
 # ── Format tables (duplicated here so scanner is self-contained) ──────────────
 
@@ -93,9 +95,24 @@ def probe_tool(exe_path):
 # ── Raw command runner ────────────────────────────────────────────────────────
 
 def _run(args, timeout=15):
+    """
+    Run a command and return combined stdout+stderr as a string.
+    Uses binary capture + explicit UTF-8 decode with fallback to avoid
+    Windows ANSI codepage issues (ffmpeg on Windows writes help to stderr
+    and the system codepage can silently corrupt text=True decoding).
+    """
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-        return (r.stdout or "") + (r.stderr or "")
+        r = subprocess.run(args, capture_output=True, timeout=timeout)
+        def _decode(b):
+            if not b:
+                return ""
+            for enc in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
+                try:
+                    return b.decode(enc)
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            return b.decode("utf-8", errors="replace")
+        return _decode(r.stdout) + _decode(r.stderr)
     except Exception:
         return ""
 
@@ -163,7 +180,8 @@ def scan_imagemagick(im_exe):
 
 
 def scan_ffmpeg(ff_exe):
-    general      = _parse_ff(_run([ff_exe, "-hide_banner", "-help"]))
+    # Use "long" help to get the full option set (basic -help omits ~half the flags)
+    general      = _parse_ff(_run([ff_exe, "-hide_banner", "-help", "long"]))
     fmt_specific = {}
 
     for fmt in ALL_FORMATS:

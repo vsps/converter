@@ -7,8 +7,10 @@ from pathlib import Path
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-PREFS_FILE       = Path.home() / ".converter_prefs.json"
-ARG_HISTORY_FILE = Path.home() / ".converter_arg_history.json"
+# All data files live next to the app so the project folder is self-contained
+APP_DIR          = Path(__file__).parent
+PREFS_FILE       = APP_DIR / "converter_prefs.json"
+ARG_HISTORY_FILE = APP_DIR / "converter_arg_history.json"
 
 # ── Format tables ─────────────────────────────────────────────────────────────
 

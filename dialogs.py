@@ -309,20 +309,31 @@ class ArgsReferenceDialog(tk.Toplevel):
                  justify="left", pady=40).pack(expand=True)
 
     def _on_search(self, *_):
-        query   = self.search_var.get().strip().lower()
-        total   = visible = 0
+        raw    = self.search_var.get().strip().lower()
+        tokens = raw.split() if raw else []
+        total  = visible = 0
+
         for entries in self._all_entries.values():
             for (row, _, __, entry) in entries:
                 total += 1
-                match = (not query) or any(
-                    query in (entry.get(k) or "").lower()
-                    for k in ("flag", "desc", "args"))
-                if match:
-                    row.pack(fill="x", padx=16, pady=1); visible += 1
+                if not tokens:
+                    match = True
                 else:
-                    row.pack_forget()
+                    haystack = " ".join([
+                        (entry.get("flag") or ""),
+                        (entry.get("desc") or ""),
+                        (entry.get("args") or ""),
+                    ]).lower()
+                    match = all(t in haystack for t in tokens)
+
+                # Always pack_forget first so re-packing restores original order
+                row.pack_forget()
+                if match:
+                    row.pack(fill="x", padx=16, pady=1)
+                    visible += 1
+
         self.count_lbl.configure(
-            text=f"{visible} / {total} shown" if query else "")
+            text=f"{visible} / {total} shown" if tokens else "")
 
 
 # ── Settings dialog ───────────────────────────────────────────────────────────
@@ -426,7 +437,7 @@ class SettingsDialog(tk.Toplevel):
         self.scan_lbl.pack(side="right")
 
         tk.Label(frame,
-                 text="Scans installed tools and saves all args to  ~/.converter_args.json",
+                 text="Scans installed tools and saves all args to  converter_args.json",
                  font=th.FONT_SMALL, bg=th.PANEL, fg=th.MUTED,
                  justify="left").pack(anchor="w", pady=(2, 8))
 
