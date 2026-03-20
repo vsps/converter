@@ -20,6 +20,10 @@ from datetime import datetime
 APP_DIR   = Path(__file__).parent
 ARGS_FILE = APP_DIR / "converter_args.json"
 
+# Set to True to write raw ffmpeg output to ff_debug_*.txt files next to the
+# app for troubleshooting parse failures.  Turn off for normal use.
+DEBUG_DUMP = False
+
 # ── Format tables (duplicated here so scanner is self-contained) ──────────────
 
 IMAGE_FORMATS = [
@@ -30,32 +34,13 @@ VIDEO_FORMATS = ["avi", "flv", "mkv", "mov", "mp4", "ts", "webm", "wmv"]
 AUDIO_FORMATS = ["aac", "aiff", "flac", "m4a", "mp3", "ogg", "opus", "wav"]
 ALL_FORMATS   = sorted(IMAGE_FORMATS + VIDEO_FORMATS + AUDIO_FORMATS)
 
-# FFmpeg format → muxer/encoder mappings
-FF_FORMAT_MAP = {
-    "mp4":  {"muxer": "mp4",      "encoder": None},
-    "mov":  {"muxer": "mov",      "encoder": None},
-    "mkv":  {"muxer": "matroska", "encoder": None},
-    "avi":  {"muxer": "avi",      "encoder": None},
-    "webm": {"muxer": "webm",     "encoder": None},
-    "flv":  {"muxer": "flv",      "encoder": None},
-    "wmv":  {"muxer": "asf",      "encoder": None},
-    "ts":   {"muxer": "mpegts",   "encoder": None},
-    "mp3":  {"muxer": "mp3",      "encoder": "libmp3lame"},
-    "aac":  {"muxer": "adts",     "encoder": "aac"},
-    "flac": {"muxer": "flac",     "encoder": "flac"},
-    "ogg":  {"muxer": "ogg",      "encoder": "libvorbis"},
-    "opus": {"muxer": "ogg",      "encoder": "libopus"},
-    "wav":  {"muxer": "wav",      "encoder": "pcm_s16le"},
-    "aiff": {"muxer": "aiff",     "encoder": None},
-    "m4a":  {"muxer": "ipod",     "encoder": "aac"},
-    "gif":  {"muxer": "gif",      "encoder": "gif"},
-    "webp": {"muxer": "webp",     "encoder": "libwebp"},
-    "avif": {"muxer": "avif",     "encoder": None},
-    "png":  {"muxer": None,       "encoder": "png"},
-    "tiff": {"muxer": None,       "encoder": "tiff"},
-    "jpeg": {"muxer": None,       "encoder": "mjpeg"},
-    "jpg":  {"muxer": None,       "encoder": "mjpeg"},
-    "bmp":  {"muxer": None,       "encoder": "bmp"},
+# FFmpeg format → muxer name (for -help muxer=…)
+FF_MUXER_MAP = {
+    "mp4": "mp4", "mov": "mov", "mkv": "matroska", "avi": "avi",
+    "webm": "webm", "flv": "flv", "wmv": "asf", "ts": "mpegts",
+    "mp3": "mp3", "aac": "adts", "flac": "flac", "ogg": "ogg",
+    "opus": "ogg", "wav": "wav", "aiff": "aiff", "m4a": "ipod",
+    "gif": "gif", "webp": "webp", "avif": "avif",
 }
 
 # ── Persistence ───────────────────────────────────────────────────────────────
@@ -116,6 +101,19 @@ def _run(args, timeout=15):
     except Exception:
         return ""
 
+# ── Debug helper ──────────────────────────────────────────────────────────────
+
+def _debug_dump(label, text):
+    """If DEBUG_DUMP is on, write raw text to a file for inspection."""
+    if not DEBUG_DUMP:
+        return
+    try:
+        safe = re.sub(r'[^\w\-]', '_', label)[:40]
+        path = APP_DIR / f"ff_debug_{safe}.txt"
+        path.write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+
 # ── Parsers ───────────────────────────────────────────────────────────────────
 
 _CAP_RE = re.compile(r"^[EDA.]{8,}\s+")
@@ -150,19 +148,75 @@ def _parse_im(text):
 
 def _parse_ff(text):
     """
-    Parse FFmpeg -help[-style] output → list of {flag, args, desc}.
-    Strips capability-flag columns (E.......... etc).
+    Parse FFmpeg help output → list of {flag, args, desc}.
+
+    Handles multiple layout styles found across -help long, -help muxer=…,
+    and -help encoder=… output:
+
+      -flag <type>                  description   ← general options (<> arg)
+      -flag  bareword               description   ← bare-word arg (no <>)
+        -flag                <type> ..desc..      ← AVOptions (deeper indent)
+      -flag                         description   ← no arg token at all
+         -flag <type>       E..V..... desc        ← capability columns in desc
+      -flag bare word               description   ← multi-word bare arg
+      -flag[:<stream_spec>] <type>  description   ← newer ffmpeg (7.x+)
+
+    Newer FFmpeg versions append [:<stream_spec>] or [:<spec>] to per-stream
+    flags (e.g. -r[:<stream_spec>] <rate>).  The bracket suffix is stripped
+    so the stored flag name is just '-r'.
     """
+    # Bracket suffix that newer ffmpeg appends to per-stream flags
+    _BRACKET_RE = re.compile(r"\[:[^\]]*\]$")
+
     entries = []
     for line in text.splitlines():
-        m = re.match(r"^\s{0,4}(-[\w\-:]+)\s+(<[^>]+>|\S+)?\s{2,}(.+)$", line)
+        # ── primary: flag[suffix]  [<type>]  description ──────────────
+        m = re.match(
+            r"^\s{0,20}"
+            r"(-[\w\-:]+(?:\[:[^\]]*\])?)"   # flag + optional [:<spec>]
+            r"\s+"
+            r"(<[^>]+>)?"                      # optional <type> token
+            r"\s{2,}"                           # gap before description
+            r"(.+)$",                           # description
+            line,
+        )
         if m:
-            entries.append({
-                "flag": m.group(1).strip(),
-                "args": _CAP_RE.sub("", (m.group(2) or "").strip()),
-                "desc": _CAP_RE.sub("", m.group(3).strip()),
-            })
+            desc = _CAP_RE.sub("", m.group(3).strip())
+            args = _CAP_RE.sub("", (m.group(2) or "").strip())
+            flag = _BRACKET_RE.sub("", m.group(1).strip())
+            if desc:
+                entries.append({"flag": flag, "args": args, "desc": desc})
+                continue
+
+        # ── fallback: flag[suffix]  bare-type-token(s)  description ───
+        # Handles single-word args (-r rate  set frame rate)
+        # and multi-word args (-hwaccel hwaccel name  use HW …)
+        m2 = re.match(
+            r"^\s{0,20}"
+            r"(-[\w\-:]+(?:\[:[^\]]*\])?)"   # flag + optional [:<spec>]
+            r"\s+(\S+(?:\s+\S+)*?)"           # bare type token(s), lazy
+            r"\s{2,}"                           # gap (2+ spaces)
+            r"(.+)$",                           # description
+            line,
+        )
+        if m2:
+            desc = _CAP_RE.sub("", m2.group(3).strip())
+            args = _CAP_RE.sub("", m2.group(2).strip())
+            flag = _BRACKET_RE.sub("", m2.group(1).strip())
+            if desc:
+                entries.append({"flag": flag, "args": args, "desc": desc})
+
     return entries
+
+
+def _dedup_entries(entries):
+    """Deduplicate a list of {flag, …} dicts by flag, keeping first."""
+    seen, out = set(), []
+    for e in entries:
+        if e["flag"] not in seen:
+            seen.add(e["flag"])
+            out.append(e)
+    return out
 
 # ── Scanners ──────────────────────────────────────────────────────────────────
 
@@ -179,31 +233,37 @@ def scan_imagemagick(im_exe):
     return {"general": general, "formats": fmt_specific}
 
 
-def scan_ffmpeg(ff_exe):
-    # Use "long" help to get the full option set (basic -help omits ~half the flags)
-    general      = _parse_ff(_run([ff_exe, "-hide_banner", "-help", "long"]))
+def scan_ffmpeg(ff_exe, progress_cb=None):
+    """
+    Build the complete FFmpeg args DB:
+      general   — flags from -help long
+      formats   — per-output-format args (muxer options)
+    """
+    def _cb(msg):
+        if progress_cb:
+            progress_cb(msg)
+
+    # ── 1. General flags from -help long ──────────────────────────────
+    _cb("  Scanning general flags…")
+    raw = _run([ff_exe, "-hide_banner", "-help", "long"])
+    _debug_dump("help_long", raw)
+    general = _parse_ff(raw)
+    _cb(f"    → {len(general)} general flags")
+
+    # ── 2. Per-format muxer options ───────────────────────────────────
+    _cb("  Scanning muxers…")
     fmt_specific = {}
-
     for fmt in ALL_FORMATS:
-        mapping = FF_FORMAT_MAP.get(fmt, {})
-        muxer   = mapping.get("muxer")
-        encoder = mapping.get("encoder")
-        entries = []
+        muxer = FF_MUXER_MAP.get(fmt)
+        if not muxer:
+            continue
+        mux_raw = _run([ff_exe, "-hide_banner", "-help", f"muxer={muxer}"])
+        _debug_dump(f"muxer_{muxer}", mux_raw)
+        entries = _parse_ff(mux_raw)
+        if entries:
+            fmt_specific[fmt] = _dedup_entries(entries)
 
-        if muxer:
-            entries += _parse_ff(_run([ff_exe, "-hide_banner", "-help", f"muxer={muxer}"]))
-        if encoder:
-            entries += _parse_ff(_run([ff_exe, "-hide_banner", "-help", f"encoder={encoder}"]))
-
-        # Deduplicate by flag (preserve first occurrence)
-        seen, deduped = set(), []
-        for e in entries:
-            if e["flag"] not in seen:
-                seen.add(e["flag"])
-                deduped.append(e)
-
-        if deduped:
-            fmt_specific[fmt] = deduped
+    _cb(f"    → {len(fmt_specific)} format sections")
 
     return {"general": general, "formats": fmt_specific}
 
@@ -227,7 +287,7 @@ def build_args_db(im_exe, ff_exe, progress_cb=None):
 
     if ff_exe and probe_tool(ff_exe)[0]:
         _cb("Scanning FFmpeg…")
-        db["ff"] = scan_ffmpeg(ff_exe)
+        db["ff"] = scan_ffmpeg(ff_exe, progress_cb=_cb)
         _cb(f"  FF → {len(db['ff']['general'])} general  "
             f"· {len(db['ff']['formats'])} format sections")
 
