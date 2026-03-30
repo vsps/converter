@@ -12,6 +12,7 @@ Modules:
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -112,11 +113,11 @@ class ConverterApp(tk.Tk):
         for _lbl, _fmt, _args in PRESETS:
             def _make_preset(f=_fmt, a=_args):
                 def _apply():
-                    app.format_var.set(f)
-                    app._on_format_change()
                     app.extra_args_text.delete("1.0", "end")
                     if a:
                         app.extra_args_text.insert("1.0", a)
+                    app.format_var.set(f)
+                    app._on_format_change()
                 return _apply
             tk.Button(quick_row, text=_lbl,
                       font=th.FONT_SMALL, bg=th.BORDER, fg=th.FG,
@@ -186,7 +187,7 @@ class ConverterApp(tk.Tk):
                  bg=th.PANEL, fg=th.MUTED).pack(side="left")
         tk.Label(args_hdr, text="(passed to engine)", font=th.FONT_SMALL,
                  bg=th.PANEL, fg=th.MUTED).pack(side="left", padx=(4, 0))
-        th.button(args_hdr, "?", lambda: app._open_args_reference(),
+        th.button(args_hdr, "ARGS", lambda: app._open_args_reference(),
                   bg=th.BORDER, fg=th.ACCENT, padx=6, pady=1).pack(side="right")
 
         self.extra_args_text = tk.Text(
@@ -227,6 +228,11 @@ class ConverterApp(tk.Tk):
         th.button(log_bar, "clear", lambda: app._clear_log(),
                   style="ghost", padx=6, pady=2).pack(side="right")
 
+        self.cmd_preview_var = tk.StringVar()
+        tk.Label(self, textvariable=self.cmd_preview_var,
+                 font=th.FONT_SMALL, bg=th.BG, fg=th.FG_DIM,
+                 anchor="w").pack(fill="x", padx=24, pady=(2, 0))
+
         log_wrap = tk.Frame(self, bg=th.PANEL,
                             highlightthickness=1, highlightbackground=th.BORDER)
         log_wrap.pack(fill="both", expand=True, padx=24, pady=(4, 12))
@@ -236,6 +242,18 @@ class ConverterApp(tk.Tk):
         self.log.tag_configure("err",    foreground=th.DANGER)
         self.log.tag_configure("dim",    foreground=th.FG_DIM)
         self.log.tag_configure("header", foreground=th.ACCENT, font=th.FONT_BOLD)
+
+        # Live command preview traces
+        for var in (self.format_var, self.prefix_var, self.suffix_var,
+                    self.input_path_var, self.input_file_var,
+                    self.input_mode, self.output_path_var):
+            var.trace_add("write", self._update_cmd_preview)
+        self.extra_args_text.bind("<KeyRelease>", self._update_cmd_preview)
+        def _on_args_modified(e):
+            if self.extra_args_text.edit_modified():
+                self.extra_args_text.edit_modified(False)
+                self._update_cmd_preview()
+        self.extra_args_text.bind("<<Modified>>", _on_args_modified)
 
     # ── Widget helpers ────────────────────────────────────────────────────
 
@@ -359,6 +377,51 @@ class ConverterApp(tk.Tk):
     def _im_cmd(self): return self.im_exe or "magick"
     def _ff_cmd(self): return self.ff_exe or "ffmpeg"
 
+    @staticmethod
+    def _short_path(p):
+        s = str(p)
+        if len(s) <= 25:
+            return s
+        parent = str(Path(p).parent)
+        name = Path(p).name
+        if len(parent) > 15:
+            parent = parent[:5] + "..." + parent[-10:]
+        return parent + "/" + name
+
+    def _update_cmd_preview(self, *_):
+        fmt = self.format_var.get().strip().lower()
+        if not fmt:
+            self.cmd_preview_var.set(""); return
+        mode = self.input_mode.get()
+        if mode == "file":
+            inp = self.input_file_var.get().strip()
+            src = Path(inp) if inp else None
+        else:
+            inp = self.input_path_var.get().strip()
+            if inp and Path(inp).is_dir():
+                files = sorted(p for p in Path(inp).glob("*")
+                               if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
+                src = files[0] if files else None
+            else:
+                src = None
+        out = self.output_path_var.get().strip()
+        if not src or not out:
+            self.cmd_preview_var.set(""); return
+        dst = Path(out) / self._output_name(src, fmt)
+        extra = self._extra_args()
+        src_ext = src.suffix.lower().lstrip(".")
+        use_im = self.has_magick and (
+            src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
+        short_src = self._short_path(src)
+        short_dst = self._short_path(dst)
+        if use_im:
+            cmd = [Path(self._im_cmd()).name, f"file:{short_src}"] + extra + [short_dst]
+        elif self.has_ffmpeg:
+            cmd = [Path(self._ff_cmd()).name, "-y", "-i", short_src] + extra + [short_dst]
+        else:
+            self.cmd_preview_var.set(""); return
+        self.cmd_preview_var.set(subprocess.list2cmdline(cmd))
+
     # ── Prefs ─────────────────────────────────────────────────────────────
 
     def _restore_prefs(self):
@@ -454,7 +517,8 @@ class ConverterApp(tk.Tk):
         """Build output filename applying prefix and suffix."""
         pre = self.prefix_var.get()
         suf = self.suffix_var.get()
-        return f"{pre}{src.stem}{suf}.{fmt}"
+        name = re.sub(r'[()\[\]{}]', '_', f"{pre}{src.stem}{suf}")
+        return f"{name}.{fmt}"
 
     def _run(self, inp: Path, out: str, fmt: str, mode: str):
         # Build file list
@@ -499,7 +563,9 @@ class ConverterApp(tk.Tk):
 
             self.after(0, lambda n=src.name: self.status_var.set(
                 f"converting {n}"))
-            success, err = self._convert_file(src, dst, fmt)
+            success, err, cmd = self._convert_file(src, dst, fmt)
+            if cmd:
+                self._log(f"$  {subprocess.list2cmdline(cmd)}", "dim")
             if success:
                 self._log(f"✓  {src.name}  →  {dst.name}", "ok"); ok += 1
             else:
@@ -510,6 +576,8 @@ class ConverterApp(tk.Tk):
         self._log(f"Done.  {summary}", "header")
         self.after(0, lambda: self.summary_var.set(summary))
         self._done()
+
+    def _start_conversion(self):
         mode = self.input_mode.get()
         inp  = (self.input_file_var.get() if mode == "file"
                 else self.input_path_var.get()).strip()
@@ -553,25 +621,27 @@ class ConverterApp(tk.Tk):
         src_ext = src.suffix.lower().lstrip(".")
         extra   = self._extra_args()
         use_im  = self.has_magick and (
-            src_ext in IMAGE_FORMATS or fmt in IMAGE_FORMATS)
+            src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
         try:
             if use_im:
-                cmd = [self._im_cmd(), str(src)] + extra + [str(dst)]
+                # file: prefix stops IM interpreting parentheses/brackets
+                # in filenames as sequence syntax
+                cmd = [self._im_cmd(), f"file:{src}"] + extra + [str(dst)]
             elif self.has_ffmpeg:
                 cmd = [self._ff_cmd(), "-y", "-i", str(src)] + extra + [str(dst)]
             else:
-                return False, "no suitable tool — check Settings"
+                return False, "no suitable tool — check Settings", None
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if r.returncode != 0:
                 lines = [l for l in
                          (r.stderr or r.stdout or "error").strip().splitlines()
                          if l.strip()]
-                return False, lines[-1] if lines else "conversion failed"
-            return True, None
+                return False, lines[-1] if lines else "conversion failed", cmd
+            return True, None, cmd
         except subprocess.TimeoutExpired:
-            return False, "timed out (>120s)"
+            return False, "timed out (>120s)", cmd
         except Exception as e:
-            return False, str(e)
+            return False, str(e), cmd
 
     def _cancel(self):
         self.cancel_flag.set()
