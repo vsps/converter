@@ -228,10 +228,13 @@ class ConverterApp(tk.Tk):
         th.button(log_bar, "clear", lambda: app._clear_log(),
                   style="ghost", padx=6, pady=2).pack(side="right")
 
-        self.cmd_preview_var = tk.StringVar()
-        tk.Label(self, textvariable=self.cmd_preview_var,
-                 font=th.FONT_SMALL, bg=th.BG, fg=th.FG_DIM,
-                 anchor="w").pack(fill="x", padx=24, pady=(2, 0))
+        self.cmd_preview = tk.Text(self, font=th.FONT_SMALL, bg=th.BG,
+                                    height=1, relief="flat", bd=0,
+                                    state="disabled", wrap="none")
+        self.cmd_preview.pack(fill="x", padx=24, pady=(2, 0))
+        self.cmd_preview.tag_configure("cmd",  foreground="#5599ff")
+        self.cmd_preview.tag_configure("file", foreground=th.SUCCESS)
+        self.cmd_preview.tag_configure("arg",  foreground=th.ACCENT)
 
         log_wrap = tk.Frame(self, bg=th.PANEL,
                             highlightthickness=1, highlightbackground=th.BORDER)
@@ -388,10 +391,19 @@ class ConverterApp(tk.Tk):
             parent = parent[:5] + "..." + parent[-10:]
         return parent + "/" + name
 
+    def _set_cmd_preview(self, parts):
+        """Write coloured parts to cmd_preview. parts: list of (text, tag)."""
+        w = self.cmd_preview
+        w.configure(state="normal")
+        w.delete("1.0", "end")
+        for text, tag in parts:
+            w.insert("end", text, tag)
+        w.configure(state="disabled")
+
     def _update_cmd_preview(self, *_):
         fmt = self.format_var.get().strip().lower()
         if not fmt:
-            self.cmd_preview_var.set(""); return
+            self._set_cmd_preview([]); return
         mode = self.input_mode.get()
         if mode == "file":
             inp = self.input_file_var.get().strip()
@@ -406,7 +418,7 @@ class ConverterApp(tk.Tk):
                 src = None
         out = self.output_path_var.get().strip()
         if not src or not out:
-            self.cmd_preview_var.set(""); return
+            self._set_cmd_preview([]); return
         dst = Path(out) / self._output_name(src, fmt)
         extra = self._extra_args()
         src_ext = src.suffix.lower().lstrip(".")
@@ -414,13 +426,18 @@ class ConverterApp(tk.Tk):
             src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
         short_src = self._short_path(src)
         short_dst = self._short_path(dst)
+        exe = Path(self._im_cmd() if use_im else self._ff_cmd()).name
+        if not use_im and not self.has_ffmpeg:
+            self._set_cmd_preview([]); return
+        parts = [(exe, "cmd")]
         if use_im:
-            cmd = [Path(self._im_cmd()).name, f"file:{short_src}"] + extra + [short_dst]
-        elif self.has_ffmpeg:
-            cmd = [Path(self._ff_cmd()).name, "-y", "-i", short_src] + extra + [short_dst]
+            parts += [(" ", ""), (f"file:{short_src}", "file")]
         else:
-            self.cmd_preview_var.set(""); return
-        self.cmd_preview_var.set(subprocess.list2cmdline(cmd))
+            parts += [(" -y -i ", "arg"), (short_src, "file")]
+        for a in extra:
+            parts += [(" ", ""), (a, "arg")]
+        parts += [(" ", ""), (short_dst, "file")]
+        self._set_cmd_preview(parts)
 
     # ── Prefs ─────────────────────────────────────────────────────────────
 

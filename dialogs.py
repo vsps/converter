@@ -44,7 +44,8 @@ class ArgValuePopup(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
 
         self.val_entry.focus_set()
-        self.val_entry.select_range(0, "end")
+        if hasattr(self.val_entry, "select_range"):
+            self.val_entry.select_range(0, "end")
 
         # Dismiss on click outside
         self.bind("<FocusOut>", self._on_focus_out)
