@@ -11,6 +11,7 @@ from pathlib import Path
 APP_DIR          = Path(__file__).parent
 PREFS_FILE       = APP_DIR / "converter_prefs.json"
 ARG_HISTORY_FILE = APP_DIR / "converter_arg_history.json"
+PRESETS_FILE     = APP_DIR / "converter_presets.json"
 
 # ── Format tables ─────────────────────────────────────────────────────────────
 
@@ -70,6 +71,23 @@ def set_last_value(flag, value):
     h = load_arg_history()
     h.setdefault("flag_values", {})[flag] = value
     save_arg_history(h)
+
+# ── User presets ─────────────────────────────────────────────────────────
+# Schema: [{"name": "hq mp4", "format": "mp4", "args": "-c:v libx264 ..."}, ...]
+
+def load_presets():
+    if PRESETS_FILE.exists():
+        try:
+            return json.loads(PRESETS_FILE.read_text())
+        except Exception:
+            pass
+    return []
+
+def save_presets(presets):
+    try:
+        PRESETS_FILE.write_text(json.dumps(presets, indent=2))
+    except Exception:
+        pass
 
 # ── Format helpers ────────────────────────────────────────────────────────────
 

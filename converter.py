@@ -1,359 +1,183 @@
 """
-converter.py — Batch File Converter (main application).
+converter.py — Batch File Converter TUI (Textual).
 
 Run with:  python converter.py
 
 Modules:
-    theme.py       — colours, fonts, ttk styles, widget factories
+    converter.tcss — styling
     persistence.py — prefs, format tables
     scanner.py     — tool probing, help parsing, args DB
-    dialogs.py     — ArgsReferenceDialog, ArgValuePopup, SettingsDialog
+    dialogs.py     — ArgsReferenceScreen, ArgValueModal, SettingsScreen
 """
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
 import re
 import subprocess
-import threading
 from pathlib import Path
 from datetime import datetime
 
-import theme as th
+from textual.app import App, ComposeResult
+from textual.containers import Horizontal, Vertical, HorizontalScroll, VerticalScroll
+from textual.widgets import (
+    Static, Input, Button, Select, Checkbox,
+    ProgressBar, RichLog, TextArea, RadioSet, RadioButton,
+)
+from textual.reactive import reactive
+from textual.worker import get_current_worker
+from textual import work
+from rich.text import Text
+
 from persistence import (
     load_prefs, save_prefs, format_badge,
+    load_presets, save_presets,
     IMAGE_FORMATS, VIDEO_FORMATS, AUDIO_FORMATS,
     ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS,
 )
 from scanner import probe_tool
-from dialogs import ArgsReferenceDialog, SettingsDialog
+from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen
 
 
-class ConverterApp(tk.Tk):
+def _plabel(name: str) -> str:
+    """Pad preset name to 12 chars with dots for left-aligned appearance."""
+    return name[:30].ljust(30, ".")
 
-    def __init__(self):
-        super().__init__()
-        self.title("Batch File Converter")
-        self.geometry("1060x600")
-        self.minsize(900, 500)
-        self.configure(bg=th.BG)
 
-        self.prefs       = load_prefs()
-        self.running     = False
-        self.cancel_flag = threading.Event()
+def _preset_sort_key(p):
+    """Sort presets: image first, then video/audio, alphabetically within."""
+    fmt = p.get("format", "")
+    if fmt in IMAGE_FORMATS:
+        group = 0
+    elif fmt in VIDEO_FORMATS:
+        group = 1
+    else:
+        group = 2
+    return (group, p.get("name", "").lower())
 
-        th.apply_ttk_styles(self)
-        self._build_ui()
+
+class ConverterApp(App):
+    CSS_PATH = "converter.tcss"
+    TITLE = "Batch File Converter"
+
+    BINDINGS = [
+        ("ctrl+q", "quit_app", "Quit"),
+        ("ctrl+s", "open_settings", "Settings"),
+    ]
+
+    running = reactive(False)
+    _ui_ready = False
+
+    def compose(self) -> ComposeResult:
+        # Header
+        with Horizontal(id="header-bar"):
+            yield Static("BATCH CONVERTER", id="title")
+            yield Static("", id="tool-status")
+            yield Button("settings", id="settings-btn")
+
+        # Three columns
+        with Horizontal(id="columns"):
+            # Col 1 — input + output + options
+            with Vertical(id="col1"):
+                inp_panel = Vertical(classes="panel", id="input-panel")
+                inp_panel.border_title = "INPUT SOURCE"
+                with inp_panel:
+                    yield RadioSet(
+                        RadioButton("FOLDER", value=True, id="rb-folder"),
+                        RadioButton("FILE", id="rb-file"),
+                        id="input-mode",
+                    )
+                    with Horizontal(classes="browse-row"):
+                        yield Input(placeholder="folder path", id="input-path")
+                        yield Button("..", id="browse-input-folder")
+                    with Horizontal(classes="browse-row"):
+                        yield Input(placeholder="file path", id="input-file")
+                        yield Button("..", id="browse-input-file")
+                out_panel = Vertical(classes="panel")
+                out_panel.border_title = "OUTPUT"
+                with out_panel:
+                    with Horizontal(classes="browse-row"):
+                        yield Input(placeholder="output folder", id="output-path")
+                        yield Button("..", id="browse-output")
+                    yield Static("", classes="sep")
+                    yield Checkbox("Overwrite existing", True, id="overwrite")
+                    yield Checkbox("Skip if src = target fmt", True, id="skip-same")
+                    yield Checkbox("Include subfolders", False, id="recurse")
+                    yield Static("", classes="sep")
+                    with Horizontal(id="ps-row"):
+                        with Vertical(classes="ps-col"):
+                            yield Static("PREFIX", classes="panel-label")
+                            yield Input(placeholder="", id="prefix")
+                        with Vertical(classes="ps-col"):
+                            yield Static("SUFFIX", classes="panel-label")
+                            yield Input(placeholder="", id="suffix")
+                    yield Static("e.g.  filename.png", id="name-preview")
+
+            # Col 2 — format + presets
+            with Vertical(id="col2"):
+                fmt_panel = Vertical(classes="panel", id="format-panel")
+                fmt_panel.border_title = "FORMAT"
+                with fmt_panel:
+                    yield Select(
+                        [(f, f) for f in ALL_FORMATS],
+                        value="png", id="format-select",
+                    )
+                    yield Static("img", id="fmt-badge")
+                preset_panel = Vertical(classes="panel", id="preset-panel")
+                preset_panel.border_title = "PRESETS"
+                with preset_panel:
+                    with VerticalScroll(id="preset-scroll"):
+                        yield Static("IMAGE", classes="preset-group-hdr")
+                        with Vertical(id="preset-img-row"):
+                            yield Button(_plabel("jpg"), id="preset-jpg")
+                            yield Button(_plabel("gif"), id="preset-gif")
+                        yield Static("VIDEO", classes="preset-group-hdr")
+                        with Vertical(id="preset-vid-row"):
+                            yield Button(_plabel("mp4"), id="preset-mp4")
+
+            # Col 3 — args + progress + buttons
+            with Vertical(id="col3"):
+                args_panel = Vertical(classes="panel")
+                args_panel.border_title = "EXTRA ARGS"
+                with args_panel:
+                    yield TextArea(id="extra-args")
+                    with Horizontal(classes="btn-row"):
+                        yield Button("ADD ARGS", id="args-btn")
+                    with Horizontal(id="save-preset-row"):
+                        yield Input(placeholder="name", id="preset-name",
+                                    max_length=30)
+                        yield Button("save", id="save-preset-btn")
+                        yield Button("del", id="del-preset-btn", classes="danger")
+                yield ProgressBar(id="progress", total=100, show_eta=False)
+                with Horizontal(classes="btn-row"):
+                    yield Button("CONVERT", id="convert-btn", classes="primary")
+                    yield Button("CANCEL", id="cancel-btn", disabled=True)
+                    yield Button("QUIT", id="quit-btn", classes="ghost")
+                yield Static("ready", id="status")
+
+        # Command preview + log
+        yield Static("", id="cmd-preview")
+        log_area = Vertical(id="log-area")
+        log_area.border_title = "LOG"
+        with log_area:
+            yield RichLog(id="log", highlight=True, markup=True)
+            with Horizontal(id="log-bar"):
+                yield Static("", id="summary")
+                yield Button("clear", id="clear-btn", classes="ghost")
+        
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────
+
+    def on_mount(self) -> None:
+        self.prefs = load_prefs()
         self._check_tools()
         self._restore_prefs()
+        self._load_user_presets()
+        self._ui_ready = True
 
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+    def action_quit_app(self) -> None:
+        self._save_session()
+        self.exit()
 
-    # ── UI ────────────────────────────────────────────────────────────────
-
-    def _build_ui(self):
-        # Python 3.14 changed Tk.__getattr__ behaviour — capture a plain
-        # reference to self so method lookups in callbacks bypass __getattr__.
-        app = self
-
-        # ── Header ──
-        hdr = tk.Frame(self, bg=th.BG, pady=14)
-        hdr.pack(fill="x", padx=24)
-        tk.Label(hdr, text="BATCH CONVERTER", font=th.FONT_BIG,
-                 bg=th.BG, fg=th.ACCENT).pack(side="left")
-        th.button(hdr, "⚙  settings", lambda: app._open_settings(),
-                  style="normal", padx=10, pady=5).pack(side="right")
-        self.tool_status = tk.Label(hdr, text="", font=th.FONT_LABEL,
-                                    bg=th.BG, fg=th.FG_DIM)
-        self.tool_status.pack(side="right", padx=(0, 16))
-        th.sep(self).pack(fill="x", padx=24)
-
-        # ── Top row: three columns ──
-        top = tk.Frame(self, bg=th.BG)
-        top.pack(fill="both", expand=True, padx=24, pady=(14, 0))
-
-        # Col 1 — input source + output folder
-        c1 = tk.Frame(top, bg=th.BG)
-        c1.pack(side="left", fill="both", expand=True, padx=(0, 12))
-        self._build_input_panel(c1)
-        self._folder_row(c1, "OUTPUT FOLDER", "output_path",
-                         lambda: app._browse_output())
-
-        # Col 2 — format + options
-        c2 = tk.Frame(top, bg=th.BG)
-        c2.pack(side="left", fill="both", expand=True, padx=(0, 12))
-
-        fmt_panel = th.panel(c2)
-        fmt_panel.pack(fill="both", expand=True, pady=(0, 8))
-        tk.Label(fmt_panel, text="OUTPUT FORMAT", font=th.FONT_LABEL,
-                 bg=th.PANEL, fg=th.MUTED).pack(anchor="w")
-        fmt_inner = tk.Frame(fmt_panel, bg=th.PANEL)
-        fmt_inner.pack(fill="x", pady=(6, 0))
-        self.format_var = tk.StringVar(value="png")
-        self.fmt_combo  = ttk.Combobox(fmt_inner, textvariable=self.format_var,
-                                       values=ALL_FORMATS, state="readonly",
-                                       font=th.FONT_UI, width=10)
-        self.fmt_combo.pack(side="left")
-        self.fmt_combo.bind("<<ComboboxSelected>>",
-                            lambda e: app._on_format_change())
-        self.fmt_badge = tk.Label(fmt_inner, text="🖼 image", font=th.FONT_LABEL,
-                                  bg=th.PANEL, fg=th.FG_DIM, padx=8)
-        self.fmt_badge.pack(side="left")
-
-        # Quick-format preset buttons
-        quick_row = tk.Frame(fmt_panel, bg=th.PANEL)
-        quick_row.pack(anchor="w", pady=(10, 0))
-        tk.Label(quick_row, text="quick:", font=th.FONT_SMALL,
-                 bg=th.PANEL, fg=th.MUTED).pack(side="left", padx=(0, 6))
-
-        PRESETS = [
-            ("jpg", "jpg",  "-quality 85"),
-            ("mp4", "mp4",  "-c:v libx264 -crf 23 -preset fast"),
-            ("gif", "gif",  ""),
-        ]
-        for _lbl, _fmt, _args in PRESETS:
-            def _make_preset(f=_fmt, a=_args):
-                def _apply():
-                    app.extra_args_text.delete("1.0", "end")
-                    if a:
-                        app.extra_args_text.insert("1.0", a)
-                    app.format_var.set(f)
-                    app._on_format_change()
-                return _apply
-            tk.Button(quick_row, text=_lbl,
-                      font=th.FONT_SMALL, bg=th.BORDER, fg=th.FG,
-                      activebackground=th.ACCENT, activeforeground=th.BG,
-                      relief="flat", bd=0, padx=10, pady=3,
-                      cursor="hand2", command=_make_preset()
-                      ).pack(side="left", padx=(0, 4))
-
-        opt_panel = th.panel(c2)
-        opt_panel.pack(fill="both", expand=True, pady=(0, 8))
-        tk.Label(opt_panel, text="OPTIONS", font=th.FONT_LABEL,
-                 bg=th.PANEL, fg=th.MUTED).pack(anchor="w", pady=(0, 6))
-        self.overwrite_var = tk.BooleanVar(value=True)
-        th.checkbox(opt_panel, "Overwrite existing files",
-                    self.overwrite_var).pack(anchor="w", pady=2)
-        self.skip_same_var = tk.BooleanVar(value=True)
-        th.checkbox(opt_panel, "Skip if source = target format",
-                    self.skip_same_var).pack(anchor="w", pady=2)
-        self.recurse_var = tk.BooleanVar(value=False)
-        th.checkbox(opt_panel, "Include subfolders",
-                    self.recurse_var).pack(anchor="w", pady=2)
-
-        # Prefix / suffix filename fields
-        th.sep(opt_panel, bg=th.BORDER).pack(fill="x", pady=(10, 8))
-        ps_row = tk.Frame(opt_panel, bg=th.PANEL)
-        ps_row.pack(fill="x")
-
-        pre_col = tk.Frame(ps_row, bg=th.PANEL)
-        pre_col.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        tk.Label(pre_col, text="PREFIX", font=th.FONT_SMALL,
-                 bg=th.PANEL, fg=th.MUTED).pack(anchor="w")
-        self.prefix_var = tk.StringVar()
-        th.entry(pre_col, self.prefix_var).pack(fill="x", pady=(2, 0))
-
-        suf_col = tk.Frame(ps_row, bg=th.PANEL)
-        suf_col.pack(side="left", fill="x", expand=True)
-        tk.Label(suf_col, text="SUFFIX", font=th.FONT_SMALL,
-                 bg=th.PANEL, fg=th.MUTED).pack(anchor="w")
-        self.suffix_var = tk.StringVar()
-        th.entry(suf_col, self.suffix_var).pack(fill="x", pady=(2, 0))
-
-        self.name_preview_var = tk.StringVar(value="")
-        tk.Label(opt_panel, textvariable=self.name_preview_var,
-                 font=th.FONT_SMALL, bg=th.PANEL, fg=th.FG_DIM,
-                 anchor="w").pack(fill="x", pady=(4, 0))
-
-        def _update_preview(*_):
-            pre = app.prefix_var.get()
-            suf = app.suffix_var.get()
-            fmt = app.format_var.get() or "ext"
-            app.name_preview_var.set(f"e.g.  {pre}filename{suf}.{fmt}")
-
-        self.prefix_var.trace_add("write", _update_preview)
-        self.suffix_var.trace_add("write", _update_preview)
-        self.format_var.trace_add("write", _update_preview)
-        _update_preview()
-
-        # Col 3 — extra args + progress + buttons
-        c3 = tk.Frame(top, bg=th.BG)
-        c3.pack(side="left", fill="both", expand=True)
-
-        args_panel = th.panel(c3)
-        args_panel.pack(fill="both", expand=True, pady=(0, 8))
-        args_hdr = tk.Frame(args_panel, bg=th.PANEL)
-        args_hdr.pack(fill="x")
-        tk.Label(args_hdr, text="EXTRA ARGS", font=th.FONT_LABEL,
-                 bg=th.PANEL, fg=th.MUTED).pack(side="left")
-        tk.Label(args_hdr, text="(passed to engine)", font=th.FONT_SMALL,
-                 bg=th.PANEL, fg=th.MUTED).pack(side="left", padx=(4, 0))
-        th.button(args_hdr, "ARGS", lambda: app._open_args_reference(),
-                  bg=th.BORDER, fg=th.ACCENT, padx=6, pady=1).pack(side="right")
-
-        self.extra_args_text = tk.Text(
-            args_panel, font=th.FONT_MONO,
-            bg=th.BG, fg=th.FG, insertbackground=th.ACCENT,
-            relief="flat", highlightthickness=1,
-            highlightbackground=th.BORDER,
-            height=3, wrap="word", padx=4, pady=4)
-        self.extra_args_text.pack(fill="both", expand=True, pady=(6, 0))
-
-        prog_frame = tk.Frame(c3, bg=th.BG)
-        prog_frame.pack(fill="x")
-        self.progress = ttk.Progressbar(prog_frame, mode="determinate")
-        self.progress.pack(fill="x", pady=(0, 8))
-        btn_row = tk.Frame(prog_frame, bg=th.BG)
-        btn_row.pack(fill="x")
-        self.run_btn = th.button(btn_row, "▶  CONVERT",
-                                 lambda: app._start_conversion(),
-                                 style="primary")
-        self.run_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.cancel_btn = th.button(btn_row, "✕  CANCEL",
-                                    lambda: app._cancel())
-        self.cancel_btn.pack(side="left")
-        self.cancel_btn.configure(state="disabled")
-        self.status_var = tk.StringVar(value="ready")
-        tk.Label(prog_frame, textvariable=self.status_var, font=th.FONT_LABEL,
-                 bg=th.BG, fg=th.FG_DIM, anchor="w").pack(fill="x", pady=(6, 0))
-
-        # ── Log strip ──
-        th.sep(self).pack(fill="x", padx=24, pady=(12, 0))
-        log_bar = tk.Frame(self, bg=th.BG)
-        log_bar.pack(fill="x", padx=24, pady=(6, 0))
-        tk.Label(log_bar, text="LOG", font=th.FONT_LABEL,
-                 bg=th.BG, fg=th.MUTED).pack(side="left")
-        self.summary_var = tk.StringVar(value="")
-        tk.Label(log_bar, textvariable=self.summary_var, font=th.FONT_LABEL,
-                 bg=th.BG, fg=th.FG_DIM).pack(side="left", padx=(12, 0))
-        th.button(log_bar, "clear", lambda: app._clear_log(),
-                  style="ghost", padx=6, pady=2).pack(side="right")
-
-        self.cmd_preview = tk.Text(self, font=th.FONT_SMALL, bg=th.BG,
-                                    height=1, relief="flat", bd=0,
-                                    state="disabled", wrap="none")
-        self.cmd_preview.pack(fill="x", padx=24, pady=(2, 0))
-        self.cmd_preview.tag_configure("cmd",  foreground="#5599ff")
-        self.cmd_preview.tag_configure("file", foreground=th.SUCCESS)
-        self.cmd_preview.tag_configure("arg",  foreground=th.ACCENT)
-
-        log_wrap = tk.Frame(self, bg=th.PANEL,
-                            highlightthickness=1, highlightbackground=th.BORDER)
-        log_wrap.pack(fill="both", expand=True, padx=24, pady=(4, 12))
-        self.log, _, _ = th.scrolled_text(log_wrap)
-        self.log.tag_configure("ok",     foreground=th.SUCCESS)
-        self.log.tag_configure("warn",   foreground=th.ACCENT)
-        self.log.tag_configure("err",    foreground=th.DANGER)
-        self.log.tag_configure("dim",    foreground=th.FG_DIM)
-        self.log.tag_configure("header", foreground=th.ACCENT, font=th.FONT_BOLD)
-
-        # Live command preview traces
-        for var in (self.format_var, self.prefix_var, self.suffix_var,
-                    self.input_path_var, self.input_file_var,
-                    self.input_mode, self.output_path_var):
-            var.trace_add("write", self._update_cmd_preview)
-        self.extra_args_text.bind("<KeyRelease>", self._update_cmd_preview)
-        def _on_args_modified(e):
-            if self.extra_args_text.edit_modified():
-                self.extra_args_text.edit_modified(False)
-                self._update_cmd_preview()
-        self.extra_args_text.bind("<<Modified>>", _on_args_modified)
-
-    # ── Widget helpers ────────────────────────────────────────────────────
-
-    def _build_input_panel(self, parent):
-        """Build the INPUT SOURCE panel with folder/file radio rows."""
-        app = self
-        self.input_mode = tk.StringVar(value="folder")
-
-        inp_panel = th.panel(parent)
-        inp_panel.pack(fill="both", expand=True, pady=(0, 10))
-        tk.Label(inp_panel, text="INPUT SOURCE", font=th.FONT_LABEL,
-                 bg=th.PANEL, fg=th.MUTED).pack(anchor="w")
-
-        # Each source row: indicator + label + browse + entry
-        # Returns (StringVar, indicator_widget, entry_widget)
-        def _source_row(mode, label_text, browse_cmd):
-            row = tk.Frame(inp_panel, bg=th.PANEL)
-            row.pack(fill="x", pady=(8, 0))
-
-            ind = tk.Label(row, text="◉" if mode == "folder" else "○",
-                           font=th.FONT_LABEL, bg=th.PANEL,
-                           fg=th.ACCENT if mode == "folder" else th.MUTED,
-                           cursor="hand2", width=2)
-            ind.pack(side="left")
-
-            lbl = tk.Label(row, text=label_text, font=th.FONT_LABEL,
-                           bg=th.PANEL, fg=th.FG, cursor="hand2")
-            lbl.pack(side="left")
-
-            th.button(row, "browse", browse_cmd,
-                      style="ghost", padx=8, pady=2).pack(side="right")
-
-            var = tk.StringVar(value="")
-            ent = th.entry(inp_panel, var)
-            ent.pack(fill="x", pady=(3, 0))
-
-            return var, ind, ent
-
-        folder_var, folder_ind, folder_ent = _source_row(
-            "folder", "FOLDER", lambda: app._browse_input_folder())
-        file_var,   file_ind,   file_ent   = _source_row(
-            "file",   "FILE",   lambda: app._browse_input_file())
-
-        self.input_path_var = folder_var
-        self.input_file_var = file_var
-
-        def _refresh_input_ui(*_):
-            active = self.input_mode.get()
-            folder_ind.configure(
-                text="◉" if active == "folder" else "○",
-                fg=th.ACCENT if active == "folder" else th.MUTED)
-            folder_ent.configure(
-                highlightbackground=th.ACCENT if active == "folder" else th.BORDER)
-            file_ind.configure(
-                text="◉" if active == "file" else "○",
-                fg=th.ACCENT if active == "file" else th.MUTED)
-            file_ent.configure(
-                highlightbackground=th.ACCENT if active == "file" else th.BORDER)
-
-        self._refresh_input_ui = _refresh_input_ui
-
-        def _select_folder(*_):
-            self.input_mode.set("folder")
-            _refresh_input_ui()
-
-        def _select_file(*_):
-            self.input_mode.set("file")
-            _refresh_input_ui()
-
-        # Bind click-to-activate on each row's widgets
-        for w in (folder_ind, folder_ent):
-            w.bind("<Button-1>", _select_folder)
-        for w in (file_ind, file_ent):
-            w.bind("<Button-1>", _select_file)
-
-        _refresh_input_ui()  # set initial visual state
-
-    def _folder_row(self, parent, label, attr, cmd):
-        frame = th.panel(parent)
-        frame.pack(fill="both", expand=True, pady=(0, 10))
-        top = tk.Frame(frame, bg=th.PANEL)
-        top.pack(fill="x")
-        tk.Label(top, text=label, font=th.FONT_LABEL,
-                 bg=th.PANEL, fg=th.MUTED).pack(side="left")
-        th.button(top, "browse", cmd,
-                  style="ghost", padx=8, pady=2).pack(side="right")
-        var = tk.StringVar(value="")
-        setattr(self, attr + "_var", var)
-        th.entry(frame, var).pack(fill="x", pady=(6, 0))
-
-    # ── Dialogs ───────────────────────────────────────────────────────────
-
-    def _open_settings(self):
-        SettingsDialog(self)
-
-    def _open_args_reference(self):
-        ArgsReferenceDialog(self, self.format_var.get())
+    def action_open_settings(self) -> None:
+        self._open_settings()
 
     # ── Tool detection ────────────────────────────────────────────────────
 
@@ -363,22 +187,136 @@ class ConverterApp(tk.Tk):
 
         im_ok, _ = probe_tool(im_exe)
         self.has_magick = im_ok
-        self.im_exe     = im_exe if im_ok else None
+        self.im_exe = im_exe if im_ok else None
         if not im_ok:
             ok, _ = probe_tool("convert")
             if ok:
                 self.has_magick, self.im_exe = True, "convert"
 
-        ff_ok, _       = probe_tool(ff_exe)
+        ff_ok, _ = probe_tool(ff_exe)
         self.has_ffmpeg = ff_ok
-        self.ff_exe     = ff_exe if ff_ok else None
+        self.ff_exe = ff_exe if ff_ok else None
 
-        self.tool_status.configure(
-            text=f"IM {'✓' if self.has_magick else '✗'}  ·  "
-                 f"FFmpeg {'✓' if self.has_ffmpeg else '✗'}")
+        status = (f"IM {'OK' if self.has_magick else 'X'}  |  "
+                  f"FFmpeg {'OK' if self.has_ffmpeg else 'X'}")
+        self.query_one("#tool-status", Static).update(status)
 
     def _im_cmd(self): return self.im_exe or "magick"
     def _ff_cmd(self): return self.ff_exe or "ffmpeg"
+
+    # ── Prefs ─────────────────────────────────────────────────────────────
+
+    def _restore_prefs(self):
+        p = self.prefs
+        if v := p.get("input_path"):
+            self.query_one("#input-path", Input).value = v
+        if v := p.get("input_file"):
+            self.query_one("#input-file", Input).value = v
+        if v := p.get("input_mode"):
+            if v == "file":
+                self.query_one("#rb-file", RadioButton).value = True
+        if v := p.get("output_path"):
+            self.query_one("#output-path", Input).value = v
+        if v := p.get("format"):
+            self.query_one("#format-select", Select).value = v
+            self._update_badge(v)
+        if v := p.get("prefix"):
+            self.query_one("#prefix", Input).value = v
+        if v := p.get("suffix"):
+            self.query_one("#suffix", Input).value = v
+        if v := p.get("extra_args"):
+            self.query_one("#extra-args", TextArea).text = v
+
+    def _save_session(self):
+        mode = "file" if self.query_one("#rb-file", RadioButton).value else "folder"
+        self.prefs.update({
+            "input_path":  self.query_one("#input-path", Input).value,
+            "input_file":  self.query_one("#input-file", Input).value,
+            "input_mode":  mode,
+            "output_path": self.query_one("#output-path", Input).value,
+            "format":      self._get_format(),
+            "prefix":      self.query_one("#prefix", Input).value,
+            "suffix":      self.query_one("#suffix", Input).value,
+            "extra_args":  self.query_one("#extra-args", TextArea).text.strip(),
+        })
+        save_prefs(self.prefs)
+
+    # ── User presets ──────────────────────────────────────────────────────
+
+    def _load_user_presets(self):
+        presets = sorted(load_presets(), key=_preset_sort_key)
+        img_row = self.query_one("#preset-img-row", Vertical)
+        vid_row = self.query_one("#preset-vid-row", Vertical)
+        for p in presets:
+            btn = Button(_plabel(p["name"]), id=f"upreset-{p['name']}")
+            if p.get("format", "") in IMAGE_FORMATS:
+                img_row.mount(btn)
+            else:
+                vid_row.mount(btn)
+
+    def _save_user_preset(self):
+        name = self.query_one("#preset-name", Input).value.strip()
+        if not name:
+            self.notify("Enter a preset name", severity="error"); return
+        name = name[:30]
+        fmt = self._get_format()
+        args = self.query_one("#extra-args", TextArea).text.strip()
+        presets = load_presets()
+        presets = [p for p in presets if p["name"] != name]
+        presets.append({"name": name, "format": fmt, "args": args})
+        save_presets(presets)
+        self._rebuild_preset_buttons()
+        self.query_one("#preset-name", Input).value = ""
+        self.notify(f"Preset '{name}' saved")
+
+    def _delete_user_preset(self):
+        name = self.query_one("#preset-name", Input).value.strip()
+        if not name:
+            self.notify("Enter preset name to delete", severity="error"); return
+        presets = load_presets()
+        new = [p for p in presets if p["name"] != name]
+        if len(new) == len(presets):
+            self.notify(f"Preset '{name}' not found", severity="error"); return
+        save_presets(new)
+        self._rebuild_preset_buttons()
+        self.query_one("#preset-name", Input).value = ""
+        self.notify(f"Preset '{name}' deleted")
+
+    def _rebuild_preset_buttons(self):
+        """Remove all user preset buttons and re-add sorted into correct groups."""
+        for btn in list(self.query("#preset-img-row Button, #preset-vid-row Button")):
+            if btn.id and btn.id.startswith("upreset-"):
+                btn.remove()
+        presets = sorted(load_presets(), key=_preset_sort_key)
+        def _remount():
+            img_row = self.query_one("#preset-img-row", Vertical)
+            vid_row = self.query_one("#preset-vid-row", Vertical)
+            for p in presets:
+                btn = Button(_plabel(p["name"]), id=f"upreset-{p['name']}")
+                if p.get("format", "") in IMAGE_FORMATS:
+                    img_row.mount(btn)
+                else:
+                    vid_row.mount(btn)
+        self.call_after_refresh(_remount)
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+
+    def _get_format(self) -> str:
+        v = self.query_one("#format-select", Select).value
+        return str(v) if v != Select.BLANK else "png"
+
+    def _get_input_mode(self) -> str:
+        return "file" if self.query_one("#rb-file", RadioButton).value else "folder"
+
+    def _update_badge(self, fmt: str):
+        self.query_one("#fmt-badge", Static).update(format_badge(fmt))
+
+    def _update_name_preview(self):
+        pre = self.query_one("#prefix", Input).value
+        suf = self.query_one("#suffix", Input).value
+        fmt = self._get_format()
+        self.query_one("#name-preview", Static).update(
+            f"e.g.  {pre}filename{suf}.{fmt}")
 
     @staticmethod
     def _short_path(p):
@@ -391,34 +329,25 @@ class ConverterApp(tk.Tk):
             parent = parent[:5] + "..." + parent[-10:]
         return parent + "/" + name
 
-    def _set_cmd_preview(self, parts):
-        """Write coloured parts to cmd_preview. parts: list of (text, tag)."""
-        w = self.cmd_preview
-        w.configure(state="normal")
-        w.delete("1.0", "end")
-        for text, tag in parts:
-            w.insert("end", text, tag)
-        w.configure(state="disabled")
-
-    def _update_cmd_preview(self, *_):
-        fmt = self.format_var.get().strip().lower()
+    def _update_cmd_preview(self):
+        fmt = self._get_format()
         if not fmt:
-            self._set_cmd_preview([]); return
-        mode = self.input_mode.get()
+            self.query_one("#cmd-preview", Static).update(""); return
+        mode = self._get_input_mode()
         if mode == "file":
-            inp = self.input_file_var.get().strip()
+            inp = self.query_one("#input-file", Input).value.strip()
             src = Path(inp) if inp else None
         else:
-            inp = self.input_path_var.get().strip()
+            inp = self.query_one("#input-path", Input).value.strip()
             if inp and Path(inp).is_dir():
                 files = sorted(p for p in Path(inp).glob("*")
                                if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
                 src = files[0] if files else None
             else:
                 src = None
-        out = self.output_path_var.get().strip()
+        out = self.query_one("#output-path", Input).value.strip()
         if not src or not out:
-            self._set_cmd_preview([]); return
+            self.query_one("#cmd-preview", Static).update(""); return
         dst = Path(out) / self._output_name(src, fmt)
         extra = self._extra_args()
         src_ext = src.suffix.lower().lstrip(".")
@@ -428,101 +357,170 @@ class ConverterApp(tk.Tk):
         short_dst = self._short_path(dst)
         exe = Path(self._im_cmd() if use_im else self._ff_cmd()).name
         if not use_im and not self.has_ffmpeg:
-            self._set_cmd_preview([]); return
-        parts = [(exe, "cmd")]
+            self.query_one("#cmd-preview", Static).update(""); return
+
+        t = Text()
+        t.append(exe, style="bold blue")
         if use_im:
-            parts += [(" ", ""), (f"file:{short_src}", "file")]
+            t.append(f" file:{short_src}", style="green")
         else:
-            parts += [(" -y -i ", "arg"), (short_src, "file")]
+            t.append(" -y -i ", style="bold yellow")
+            t.append(short_src, style="green")
         for a in extra:
-            parts += [(" ", ""), (a, "arg")]
-        parts += [(" ", ""), (short_dst, "file")]
-        self._set_cmd_preview(parts)
+            t.append(f" {a}", style="bold yellow")
+        t.append(f" {short_dst}", style="green")
+        self.query_one("#cmd-preview", Static).update(t)
 
-    # ── Prefs ─────────────────────────────────────────────────────────────
+    # ── Event handlers ────────────────────────────────────────────────────
 
-    def _restore_prefs(self):
-        if v := self.prefs.get("input_path"):  self.input_path_var.set(v)
-        if v := self.prefs.get("input_file"):  self.input_file_var.set(v)
-        if v := self.prefs.get("input_mode"):
-            self.input_mode.set(v)
-            self._refresh_input_ui()
-        if v := self.prefs.get("output_path"): self.output_path_var.set(v)
-        if v := self.prefs.get("format"):
-            self.format_var.set(v)
-            self._on_format_change()
-        if v := self.prefs.get("prefix"):      self.prefix_var.set(v)
-        if v := self.prefs.get("suffix"):      self.suffix_var.set(v)
-        if v := self.prefs.get("extra_args"):
-            self.extra_args_text.configure(state="normal")
-            self.extra_args_text.insert("1.0", v)
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if not self._ui_ready:
+            return
+        if event.select.id == "format-select":
+            fmt = str(event.value) if event.value != Select.BLANK else "png"
+            self._update_badge(fmt)
+            self._update_name_preview()
+            self._update_cmd_preview()
 
-    def _save_session(self):
-        self.prefs.update({
-            "input_path":  self.input_path_var.get(),
-            "input_file":  self.input_file_var.get(),
-            "input_mode":  self.input_mode.get(),
-            "output_path": self.output_path_var.get(),
-            "format":      self.format_var.get(),
-            "prefix":      self.prefix_var.get(),
-            "suffix":      self.suffix_var.get(),
-            "extra_args":  self.extra_args_text.get("1.0", "end").strip(),
-        })
-        save_prefs(self.prefs)
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if not self._ui_ready:
+            return
+        if event.input.id in ("prefix", "suffix"):
+            self._update_name_preview()
+        if event.input.id in ("input-path", "input-file", "output-path",
+                               "prefix", "suffix"):
+            self._update_cmd_preview()
 
-    def _on_close(self):
-        self._save_session()
-        self.destroy()
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if not self._ui_ready:
+            return
+        if event.text_area.id == "extra-args":
+            self._update_cmd_preview()
 
-    # ── Browse / format ───────────────────────────────────────────────────
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        if not self._ui_ready:
+            return
+        if event.radio_set.id == "input-mode":
+            self._update_cmd_preview()
 
-    def _browse_input_folder(self):
-        d = filedialog.askdirectory(title="Select input folder")
-        if d:
-            self.input_path_var.set(d)
-            self.input_mode.set("folder")
-            self._refresh_input_ui()
-            if not self.output_path_var.get():
-                self.output_path_var.set(d)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id or ""
+        if btn_id == "convert-btn":
+            self._start_conversion()
+        elif btn_id == "cancel-btn":
+            self._cancel()
+        elif btn_id == "quit-btn":
+            self.action_quit_app()
+        elif btn_id == "clear-btn":
+            self._clear_log()
+        elif btn_id == "settings-btn":
+            self._open_settings()
+        elif btn_id == "args-btn":
+            self._open_args_reference()
+        elif btn_id == "save-preset-btn":
+            self._save_user_preset()
+        elif btn_id == "del-preset-btn":
+            self._delete_user_preset()
+        elif btn_id == "browse-input-folder":
+            self._browse("folder", "#input-path")
+        elif btn_id == "browse-input-file":
+            self._browse("file", "#input-file")
+        elif btn_id == "browse-output":
+            self._browse("folder", "#output-path")
+        elif btn_id == "preset-jpg":
+            self._apply_preset("jpg", "-quality 85", "jpg")
+        elif btn_id == "preset-mp4":
+            self._apply_preset("mp4", "-c:v libx264 -crf 23 -preset fast", "mp4")
+        elif btn_id == "preset-gif":
+            self._apply_preset("gif", "", "gif")
+        elif btn_id.startswith("upreset-"):
+            self._apply_user_preset(btn_id[8:])
 
-    def _browse_input_file(self):
-        f = filedialog.askopenfilename(title="Select input file")
-        if f:
-            self.input_file_var.set(f)
-            self.input_mode.set("file")
-            self._refresh_input_ui()
-            if not self.output_path_var.get():
-                self.output_path_var.set(str(Path(f).parent))
+    def _apply_preset(self, fmt: str, args: str, preset_name: str = ""):
+        self.query_one("#format-select", Select).value = fmt
+        self.query_one("#extra-args", TextArea).text = args
+        if preset_name:
+            self.query_one("#preset-name", Input).value = preset_name
+        self._update_badge(fmt)
+        self._update_name_preview()
+        self._update_cmd_preview()
 
-    def _browse_output(self):
-        d = filedialog.askdirectory(title="Select output folder")
-        if d:
-            self.output_path_var.set(d)
+    def _apply_user_preset(self, name: str):
+        presets = load_presets()
+        for p in presets:
+            if p["name"] == name:
+                self._apply_preset(p["format"], p.get("args", ""), name)
+                return
 
-    def _on_format_change(self, *_):
-        self.fmt_badge.configure(text=format_badge(self.format_var.get()))
+    # ── Browse ────────────────────────────────────────────────────────────
+
+    def _browse(self, mode: str, target_id: str):
+        current = self.query_one(target_id, Input).value.strip()
+        start = current if current else "."
+        self.push_screen(
+            BrowseScreen(mode=mode, start_path=start),
+            lambda result: self._on_browse_result(result, target_id, mode))
+
+    def _on_browse_result(self, result, target_id, mode):
+        if result:
+            self.query_one(target_id, Input).value = result
+            if target_id == "#input-path":
+                self.query_one("#rb-folder", RadioButton).value = True
+                if not self.query_one("#output-path", Input).value:
+                    self.query_one("#output-path", Input).value = result
+            elif target_id == "#input-file":
+                self.query_one("#rb-file", RadioButton).value = True
+                if not self.query_one("#output-path", Input).value:
+                    self.query_one("#output-path", Input).value = str(
+                        Path(result).parent)
+
+    # ── Dialogs ───────────────────────────────────────────────────────────
+
+    def _open_settings(self):
+        self.push_screen(SettingsScreen(self.prefs), self._on_settings_close)
+
+    def _on_settings_close(self, result) -> None:
+        if result:
+            self.prefs = result
+            self._check_tools()
+
+    def _open_args_reference(self):
+        fmt = self._get_format()
+        self.push_screen(ArgsReferenceScreen(fmt), self._on_args_close)
+
+    def _on_args_close(self, result) -> None:
+        if result:
+            ta = self.query_one("#extra-args", TextArea)
+            current = ta.text.strip()
+            sep = " " if current and not current.endswith("\n") else ""
+            ta.text = current + sep + result if current else result
 
     # ── Logging ───────────────────────────────────────────────────────────
 
-    def _log(self, msg, tag=""):
-        def _inner():
-            self.log.configure(state="normal")
-            self.log.insert("end",
-                f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n", tag)
-            self.log.see("end")
-            self.log.configure(state="disabled")
-        self.after(0, _inner)
+    def _log(self, msg: str, style: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        log_widget = self.query_one("#log", RichLog)
+        if style == "ok":
+            log_widget.write(Text(f"[{ts}] {msg}", style="green"))
+        elif style == "warn":
+            log_widget.write(Text(f"[{ts}] {msg}", style="yellow"))
+        elif style == "err":
+            log_widget.write(Text(f"[{ts}] {msg}", style="red"))
+        elif style == "dim":
+            log_widget.write(Text(f"[{ts}] {msg}", style="dim"))
+        elif style == "header":
+            log_widget.write(Text(f"[{ts}] {msg}", style="bold yellow"))
+        else:
+            log_widget.write(f"[{ts}] {msg}")
 
     def _clear_log(self):
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.configure(state="disabled")
-        self.summary_var.set("")
+        self.query_one("#log", RichLog).clear()
+        self.query_one("#summary", Static).update("")
 
     # ── Conversion ────────────────────────────────────────────────────────
 
     def _extra_args(self):
-        raw = self.extra_args_text.get("1.0", "end").strip()
+        raw = self.query_one("#extra-args", TextArea).text.strip()
         return raw.split() if raw else []
 
     def _collect_files(self, folder, recurse):
@@ -531,123 +529,137 @@ class ConverterApp(tk.Tk):
                       if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
 
     def _output_name(self, src: Path, fmt: str) -> str:
-        """Build output filename applying prefix and suffix."""
-        pre = self.prefix_var.get()
-        suf = self.suffix_var.get()
+        pre = self.query_one("#prefix", Input).value
+        suf = self.query_one("#suffix", Input).value
         name = re.sub(r'[()\[\]{}]', '_', f"{pre}{src.stem}{suf}")
         return f"{name}.{fmt}"
 
-    def _run(self, inp: Path, out: str, fmt: str, mode: str):
-        # Build file list
-        if mode == "file":
-            if inp.suffix.lower() not in ALL_EXTENSIONS:
-                self._log(f"Unsupported file type: {inp.suffix}", "err")
-                self._done(); return
-            files = [inp]
-        else:
-            files = self._collect_files(inp, self.recurse_var.get())
-
-        if not files:
-            self._log("No compatible files found.", "warn")
-            self._done(); return
-
-        src_desc = inp.name if mode == "file" else str(inp)
-        self._log(f"{'File' if mode == 'file' else 'Folder'}:  {src_desc}  "
-                  f"→  {len(files)} file(s)  →  .{fmt}", "header")
-        ok = skip = fail = 0
-        self.after(0, lambda: self.progress.configure(
-            maximum=len(files), value=0))
-
-        for i, src in enumerate(files):
-            if self.cancel_flag.is_set():
-                self._log("Cancelled.", "warn"); break
-
-            src_ext = src.suffix.lower().lstrip(".")
-
-            if self.skip_same_var.get() and src_ext == fmt \
-                    and not self.prefix_var.get() and not self.suffix_var.get():
-                self._log(f"skip  {src.name}  (already {fmt})", "dim")
-                skip += 1
-                self.after(0, lambda v=i+1: self.progress.configure(value=v))
-                continue
-
-            dst = Path(out) / self._output_name(src, fmt)
-            if not self.overwrite_var.get() and dst.exists():
-                self._log(f"skip  {src.name}  (exists)", "dim")
-                skip += 1
-                self.after(0, lambda v=i+1: self.progress.configure(value=v))
-                continue
-
-            self.after(0, lambda n=src.name: self.status_var.set(
-                f"converting {n}"))
-            success, err, cmd = self._convert_file(src, dst, fmt)
-            if cmd:
-                self._log(f"$  {subprocess.list2cmdline(cmd)}", "dim")
-            if success:
-                self._log(f"✓  {src.name}  →  {dst.name}", "ok"); ok += 1
-            else:
-                self._log(f"✗  {src.name}  —  {err}", "err"); fail += 1
-            self.after(0, lambda v=i+1: self.progress.configure(value=v))
-
-        summary = f"{ok} converted  ·  {skip} skipped  ·  {fail} failed"
-        self._log(f"Done.  {summary}", "header")
-        self.after(0, lambda: self.summary_var.set(summary))
-        self._done()
-
     def _start_conversion(self):
-        mode = self.input_mode.get()
-        inp  = (self.input_file_var.get() if mode == "file"
-                else self.input_path_var.get()).strip()
-        out  = self.output_path_var.get().strip()
-        fmt  = self.format_var.get().strip().lower()
+        mode = self._get_input_mode()
+        inp = (self.query_one("#input-file", Input).value if mode == "file"
+               else self.query_one("#input-path", Input).value).strip()
+        out = self.query_one("#output-path", Input).value.strip()
+        fmt = self._get_format()
 
         if not inp:
-            messagebox.showerror("Missing input",
-                "Please select an input folder or file.")
-            return
+            self.notify("Select an input folder or file", severity="error"); return
         if not out:
-            messagebox.showerror("Missing output",
-                "Please set an output folder.")
-            return
+            self.notify("Set an output folder", severity="error"); return
         if not fmt:
-            messagebox.showerror("No format", "Please select an output format.")
-            return
+            self.notify("Select an output format", severity="error"); return
         if not self.has_magick and not self.has_ffmpeg:
-            messagebox.showerror("No tools found",
-                "Neither ImageMagick nor FFmpeg could be found.\n\n"
-                "Open ⚙ Settings and point to your installed executables.")
-            return
-
-        # Validate input exists
+            self.notify("No tools found — open Settings", severity="error"); return
         inp_path = Path(inp)
         if not inp_path.exists():
-            messagebox.showerror("Not found",
-                f"Input does not exist:\n{inp}")
-            return
+            self.notify(f"Input not found: {inp}", severity="error"); return
 
         Path(out).mkdir(parents=True, exist_ok=True)
         self._save_session()
         self.running = True
-        self.cancel_flag.clear()
-        self.run_btn.configure(state="disabled")
-        self.cancel_btn.configure(state="normal")
-        threading.Thread(target=self._run,
-                         args=(inp_path, out, fmt, mode), daemon=True).start()
+        self.query_one("#convert-btn", Button).disabled = True
+        self.query_one("#cancel-btn", Button).disabled = False
+        self.query_one("#status", Static).update("converting...")
 
-    def _convert_file(self, src, dst, fmt):
+        overwrite = self.query_one("#overwrite", Checkbox).value
+        skip_same = self.query_one("#skip-same", Checkbox).value
+        recurse = self.query_one("#recurse", Checkbox).value
+        prefix = self.query_one("#prefix", Input).value
+        suffix = self.query_one("#suffix", Input).value
+        extra = self._extra_args()
+
+        self._run_conversion(inp_path, out, fmt, mode,
+                             overwrite, skip_same, recurse, prefix, suffix, extra)
+
+    @work(exclusive=True, thread=True)
+    def _run_conversion(self, inp, out, fmt, mode,
+                        overwrite, skip_same, recurse, prefix, suffix, extra):
+        worker = get_current_worker()
+
+        if mode == "file":
+            if inp.suffix.lower() not in ALL_EXTENSIONS:
+                self.call_from_thread(self._log,
+                                      f"Unsupported: {inp.suffix}", "err")
+                self.call_from_thread(self._done); return
+            files = [inp]
+        else:
+            files = self._collect_files(inp, recurse)
+
+        if not files:
+            self.call_from_thread(self._log, "No compatible files.", "warn")
+            self.call_from_thread(self._done); return
+
+        src_desc = inp.name if mode == "file" else str(inp)
+        self.call_from_thread(
+            self._log,
+            f"{'File' if mode == 'file' else 'Folder'}:  {src_desc}  "
+            f"-> {len(files)} file(s) -> .{fmt}", "header")
+
+        ok = skip = fail = 0
+        pb = self.query_one("#progress", ProgressBar)
+        self.call_from_thread(setattr, pb, "total", len(files))
+        self.call_from_thread(pb.update, progress=0)
+
+        for i, src in enumerate(files):
+            if worker.is_cancelled:
+                self.call_from_thread(self._log, "Cancelled.", "warn")
+                break
+
+            src_ext = src.suffix.lower().lstrip(".")
+
+            if skip_same and src_ext == fmt and not prefix and not suffix:
+                self.call_from_thread(
+                    self._log, f"skip  {src.name}  (already {fmt})", "dim")
+                skip += 1
+                self.call_from_thread(pb.update, advance=1)
+                continue
+
+            name = re.sub(r'[()\[\]{}]', '_',
+                          f"{prefix}{src.stem}{suffix}")
+            dst = Path(out) / f"{name}.{fmt}"
+
+            if not overwrite and dst.exists():
+                self.call_from_thread(
+                    self._log, f"skip  {src.name}  (exists)", "dim")
+                skip += 1
+                self.call_from_thread(pb.update, advance=1)
+                continue
+
+            self.call_from_thread(
+                self.query_one("#status", Static).update,
+                f"converting {src.name}")
+
+            success, err, cmd = self._convert_file(src, dst, fmt, extra)
+            if cmd:
+                self.call_from_thread(
+                    self._log,
+                    f"$  {subprocess.list2cmdline(cmd)}", "dim")
+            if success:
+                self.call_from_thread(
+                    self._log, f"OK  {src.name}  ->  {dst.name}", "ok")
+                ok += 1
+            else:
+                self.call_from_thread(
+                    self._log, f"X  {src.name}  --  {err}", "err")
+                fail += 1
+            self.call_from_thread(pb.update, advance=1)
+
+        summary = f"{ok} converted  |  {skip} skipped  |  {fail} failed"
+        self.call_from_thread(self._log, f"Done.  {summary}", "header")
+        self.call_from_thread(
+            self.query_one("#summary", Static).update, summary)
+        self.call_from_thread(self._done)
+
+    def _convert_file(self, src, dst, fmt, extra):
         src_ext = src.suffix.lower().lstrip(".")
-        extra   = self._extra_args()
-        use_im  = self.has_magick and (
+        use_im = self.has_magick and (
             src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
         try:
             if use_im:
-                # file: prefix stops IM interpreting parentheses/brackets
-                # in filenames as sequence syntax
                 cmd = [self._im_cmd(), f"file:{src}"] + extra + [str(dst)]
             elif self.has_ffmpeg:
                 cmd = [self._ff_cmd(), "-y", "-i", str(src)] + extra + [str(dst)]
             else:
-                return False, "no suitable tool — check Settings", None
+                return False, "no suitable tool", None
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if r.returncode != 0:
                 lines = [l for l in
@@ -658,21 +670,21 @@ class ConverterApp(tk.Tk):
         except subprocess.TimeoutExpired:
             return False, "timed out (>120s)", cmd
         except Exception as e:
-            return False, str(e), cmd
+            return False, str(e), None
 
     def _cancel(self):
-        self.cancel_flag.set()
-        self.cancel_btn.configure(state="disabled")
+        self.workers.cancel_group(self, "default")
+        self.query_one("#cancel-btn", Button).disabled = True
 
     def _done(self):
         self.running = False
-        self.after(0, lambda: self.run_btn.configure(state="normal"))
-        self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
-        self.after(0, lambda: self.status_var.set("done"))
+        self.query_one("#convert-btn", Button).disabled = False
+        self.query_one("#cancel-btn", Button).disabled = True
+        self.query_one("#status", Static).update("done")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     app = ConverterApp()
-    app.mainloop()
+    app.run()
