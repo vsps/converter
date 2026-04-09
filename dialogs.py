@@ -1,6 +1,6 @@
 """
 dialogs.py — SettingsScreen, ArgsReferenceScreen, ArgValueModal,
-             BrowseScreen (Textual).
+             BrowseScreen, SplashScreen (Textual).
 """
 
 import threading
@@ -21,7 +21,37 @@ from scanner import (
 from persistence import save_prefs, get_last_value, set_last_value
 
 
-# ── Browse Screen ────────────────────────────────────────────────────────────
+# ── Splash Screen ─────────────────────────────────────────────────────────────
+
+_LOGO = """\
+ ▄████▄   ▒█████   ███▄    █ ██▒   █▓▓█████  ██▀███  ▄▄▄█████▓▓█████  ██▀███
+▒██▀ ▀█  ▒██▒  ██▒ ██ ▀█   █▓██░   █▒▓█   ▀ ▓██ ▒ ██▒▓  ██▒ ▓▒▓█   ▀ ▓██ ▒ ██▒
+▒▓█    ▄ ▒██░  ██▒▓██  ▀█ ██▒▓██  █▒░▒███   ▓██ ░▄█ ▒▒ ▓██░ ▒░▒███   ▓██ ░▄█ ▒
+▒▓▓▄ ▄██▒▒██   ██░▓██▒  ▐▌██▒ ▒██ █░░▒▓█  ▄ ▒██▀▀█▄  ░ ▓██▓ ░ ▒▓█  ▄ ▒██▀▀█▄
+▒ ▓███▀ ░░ ████▓▒░▒██░   ▓██░  ▒▀█░  ░▒████▒░██▓ ▒██▒  ▒██▒ ░ ░▒████▒░██▓ ▒██▒
+░ ░▒ ▒  ░░ ▒░▒░▒░ ░ ▒░   ▒ ▒   ░ ▐░  ░░ ▒░ ░░ ▒▓ ░▒▓░  ▒ ░░   ░░ ▒░ ░░ ▒▓ ░▒▓░
+  ░  ▒     ░ ▒ ▒░ ░ ░░   ░ ▒░  ░ ░░   ░ ░  ░  ░▒ ░ ▒░    ░     ░ ░  ░  ░▒ ░ ▒░
+░        ░ ░ ░ ▒     ░   ░ ░     ░░     ░     ░░   ░   ░         ░     ░░   ░
+░ ░          ░ ░           ░      ░     ░  ░   ░                 ░  ░   ░
+░                                ░                                            \
+"""
+
+
+class SplashScreen(Screen):
+    """Full-screen splash — dismissed by any key or click."""
+
+    def compose(self) -> ComposeResult:
+        yield Static(_LOGO, id="splash-logo")
+        yield Static("press any key", id="splash-hint")
+
+    def on_key(self) -> None:
+        self.dismiss()
+
+    def on_click(self) -> None:
+        self.dismiss()
+
+
+# ── Browse Screen ─────────────────────────────────────────────────────────────
 
 class BrowseScreen(Screen):
     """Simple file/directory browser. mode='folder' or 'file'."""

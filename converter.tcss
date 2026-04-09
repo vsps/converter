@@ -11,6 +11,25 @@ $c-fg-dim: #888888;
 $c-danger: #ff4d4d;
 $c-success: #47ffb0;
 
+/* ═══ Splash Screen ═════════════════════════════════════ */
+
+SplashScreen {
+    background: $c-bg;
+    align: center middle;
+}
+#splash-logo {
+    color: $c-accent;
+    text-style: bold;
+    content-align: center middle;
+    width: auto;
+}
+#splash-hint {
+    color: $c-muted;
+    content-align: center middle;
+    width: 100%;
+    margin-top: 2;
+}
+
 Screen {
     background: $c-bg;
 }

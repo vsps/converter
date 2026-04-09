@@ -33,7 +33,7 @@ from persistence import (
     ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS,
 )
 from scanner import probe_tool
-from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen
+from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen, SplashScreen
 
 
 def _plabel(name: str) -> str:
@@ -171,6 +171,7 @@ class ConverterApp(App):
         self._restore_prefs()
         self._load_user_presets()
         self._ui_ready = True
+        self.push_screen(SplashScreen())
 
     def action_quit_app(self) -> None:
         self._save_session()
