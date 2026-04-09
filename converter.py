@@ -10,6 +10,7 @@ Modules:
     dialogs.py     — ArgsReferenceScreen, ArgValueModal, SettingsScreen
 """
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -33,7 +34,7 @@ from persistence import (
     ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS,
 )
 from scanner import probe_tool
-from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen, SplashScreen
+from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen
 
 
 def _plabel(name: str) -> str:
@@ -64,6 +65,7 @@ class ConverterApp(App):
 
     running = reactive(False)
     _ui_ready = False
+    _current_preset: str = ""
 
     def compose(self) -> ComposeResult:
         # Header
@@ -82,14 +84,12 @@ class ConverterApp(App):
                     yield RadioSet(
                         RadioButton("FOLDER", value=True, id="rb-folder"),
                         RadioButton("FILE", id="rb-file"),
+                        RadioButton("SEQ", id="rb-seq"),
                         id="input-mode",
                     )
                     with Horizontal(classes="browse-row"):
-                        yield Input(placeholder="folder path", id="input-path")
-                        yield Button("..", id="browse-input-folder")
-                    with Horizontal(classes="browse-row"):
-                        yield Input(placeholder="file path", id="input-file")
-                        yield Button("..", id="browse-input-file")
+                        yield Input(placeholder="folder / file path", id="input-source")
+                        yield Button("..", id="browse-input")
                 out_panel = Vertical(classes="panel")
                 out_panel.border_title = "OUTPUT"
                 with out_panel:
@@ -101,14 +101,11 @@ class ConverterApp(App):
                     yield Checkbox("Skip if src = target fmt", True, id="skip-same")
                     yield Checkbox("Include subfolders", False, id="recurse")
                     yield Static("", classes="sep")
-                    with Horizontal(id="ps-row"):
-                        with Vertical(classes="ps-col"):
-                            yield Static("PREFIX", classes="panel-label")
-                            yield Input(placeholder="", id="prefix")
-                        with Vertical(classes="ps-col"):
-                            yield Static("SUFFIX", classes="panel-label")
-                            yield Input(placeholder="", id="suffix")
-                    yield Static("e.g.  filename.png", id="name-preview")
+                    yield Input(placeholder="[inputFile]", id="output-template")
+                    yield Static(
+                        "tokens: [YYYYMMDD]  [inputFile]  [sequence]  [username]  [codec]  [preset]",
+                        id="token-hint")
+                    yield Static("", id="name-preview")
 
             # Col 2 — format + presets
             with Vertical(id="col2"):
@@ -161,7 +158,7 @@ class ConverterApp(App):
             with Horizontal(id="log-bar"):
                 yield Static("", id="summary")
                 yield Button("clear", id="clear-btn", classes="ghost")
-        
+
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -171,7 +168,6 @@ class ConverterApp(App):
         self._restore_prefs()
         self._load_user_presets()
         self._ui_ready = True
-        self.push_screen(SplashScreen())
 
     def action_quit_app(self) -> None:
         self._save_session()
@@ -209,35 +205,30 @@ class ConverterApp(App):
 
     def _restore_prefs(self):
         p = self.prefs
-        if v := p.get("input_path"):
-            self.query_one("#input-path", Input).value = v
-        if v := p.get("input_file"):
-            self.query_one("#input-file", Input).value = v
+        if v := p.get("input_source"):
+            self.query_one("#input-source", Input).value = v
         if v := p.get("input_mode"):
             if v == "file":
                 self.query_one("#rb-file", RadioButton).value = True
+            elif v == "sequence":
+                self.query_one("#rb-seq", RadioButton).value = True
         if v := p.get("output_path"):
             self.query_one("#output-path", Input).value = v
         if v := p.get("format"):
             self.query_one("#format-select", Select).value = v
             self._update_badge(v)
-        if v := p.get("prefix"):
-            self.query_one("#prefix", Input).value = v
-        if v := p.get("suffix"):
-            self.query_one("#suffix", Input).value = v
+        if v := p.get("output_template"):
+            self.query_one("#output-template", Input).value = v
         if v := p.get("extra_args"):
             self.query_one("#extra-args", TextArea).text = v
 
     def _save_session(self):
-        mode = "file" if self.query_one("#rb-file", RadioButton).value else "folder"
         self.prefs.update({
-            "input_path":  self.query_one("#input-path", Input).value,
-            "input_file":  self.query_one("#input-file", Input).value,
-            "input_mode":  mode,
+            "input_source": self.query_one("#input-source", Input).value,
+            "input_mode":   self._get_input_mode(),
             "output_path": self.query_one("#output-path", Input).value,
             "format":      self._get_format(),
-            "prefix":      self.query_one("#prefix", Input).value,
-            "suffix":      self.query_one("#suffix", Input).value,
+            "output_template": self.query_one("#output-template", Input).value,
             "extra_args":  self.query_one("#extra-args", TextArea).text.strip(),
         })
         save_prefs(self.prefs)
@@ -307,17 +298,44 @@ class ConverterApp(App):
         return str(v) if v != Select.BLANK else "png"
 
     def _get_input_mode(self) -> str:
-        return "file" if self.query_one("#rb-file", RadioButton).value else "folder"
+        if self.query_one("#rb-file", RadioButton).value:
+            return "file"
+        if self.query_one("#rb-seq", RadioButton).value:
+            return "sequence"
+        return "folder"
 
     def _update_badge(self, fmt: str):
         self.query_one("#fmt-badge", Static).update(format_badge(fmt))
 
+    def _resolve_codec(self) -> str:
+        args = self._extra_args()
+        flags = {"-c:v", "-c:a", "-vcodec", "-acodec"}
+        for i, a in enumerate(args):
+            if a in flags and i + 1 < len(args):
+                return args[i + 1]
+        return ""
+
+    @staticmethod
+    def _resolve_token(template, src, fmt, index, codec, preset_name) -> str:
+        date_str = datetime.now().strftime("%Y%m%d")
+        try:
+            username = os.getlogin()
+        except Exception:
+            username = ""
+        result = template or "[inputFile]"
+        result = result.replace("[YYYYMMDD]", date_str)
+        result = result.replace("[inputFile]", src.stem)
+        result = result.replace("[sequence]", f"{index + 1:04d}")
+        result = result.replace("[username]", username)
+        result = result.replace("[codec]", codec)
+        result = result.replace("[preset]", preset_name)
+        return re.sub(r'[()\[\]{}]', '_', result)
+
     def _update_name_preview(self):
-        pre = self.query_one("#prefix", Input).value
-        suf = self.query_one("#suffix", Input).value
         fmt = self._get_format()
-        self.query_one("#name-preview", Static).update(
-            f"e.g.  {pre}filename{suf}.{fmt}")
+        fake = Path("filename.ext")
+        preview = self._output_name(fake, fmt, index=0)
+        self.query_one("#name-preview", Static).update(f"e.g.  {preview}")
 
     @staticmethod
     def _short_path(p):
@@ -335,22 +353,50 @@ class ConverterApp(App):
         if not fmt:
             self.query_one("#cmd-preview", Static).update(""); return
         mode = self._get_input_mode()
+        out = self.query_one("#output-path", Input).value.strip()
+        inp = self.query_one("#input-source", Input).value.strip()
+        extra = self._extra_args()
+
+        if mode == "sequence":
+            if inp and Path(inp).exists() and out:
+                seq = self._resolve_sequence(Path(inp))
+                if seq:
+                    template = self.query_one("#output-template", Input).value
+                    dst_stem = self._resolve_token(template,
+                                                   Path(seq["stem_prefix"]), fmt, 0,
+                                                   self._resolve_codec(),
+                                                   self._current_preset)
+                    dst = Path(out) / f"{dst_stem}.{fmt}"
+                    pat = self._short_path(seq["pattern"])
+                    short_dst = self._short_path(dst)
+                    exe = Path(self._ff_cmd()).name
+                    if not self.has_ffmpeg:
+                        self.query_one("#cmd-preview", Static).update(""); return
+                    t = Text()
+                    t.append(exe, style="bold blue")
+                    t.append(" -y", style="bold yellow")
+                    t.append(f" -start_number {seq['start']}", style="bold yellow")
+                    t.append(" -i ", style="bold yellow")
+                    t.append(pat, style="green")
+                    for a in extra:
+                        t.append(f" {a}", style="bold yellow")
+                    t.append(f" {short_dst}", style="green")
+                    self.query_one("#cmd-preview", Static).update(t)
+                    return
+            self.query_one("#cmd-preview", Static).update(""); return
+
         if mode == "file":
-            inp = self.query_one("#input-file", Input).value.strip()
             src = Path(inp) if inp else None
         else:
-            inp = self.query_one("#input-path", Input).value.strip()
             if inp and Path(inp).is_dir():
                 files = sorted(p for p in Path(inp).glob("*")
                                if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
                 src = files[0] if files else None
             else:
                 src = None
-        out = self.query_one("#output-path", Input).value.strip()
         if not src or not out:
             self.query_one("#cmd-preview", Static).update(""); return
         dst = Path(out) / self._output_name(src, fmt)
-        extra = self._extra_args()
         src_ext = src.suffix.lower().lstrip(".")
         use_im = self.has_magick and (
             src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
@@ -386,10 +432,9 @@ class ConverterApp(App):
     def on_input_changed(self, event: Input.Changed) -> None:
         if not self._ui_ready:
             return
-        if event.input.id in ("prefix", "suffix"):
+        if event.input.id == "output-template":
             self._update_name_preview()
-        if event.input.id in ("input-path", "input-file", "output-path",
-                               "prefix", "suffix"):
+        if event.input.id in ("input-source", "output-path", "output-template"):
             self._update_cmd_preview()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
@@ -422,10 +467,9 @@ class ConverterApp(App):
             self._save_user_preset()
         elif btn_id == "del-preset-btn":
             self._delete_user_preset()
-        elif btn_id == "browse-input-folder":
-            self._browse("folder", "#input-path")
-        elif btn_id == "browse-input-file":
-            self._browse("file", "#input-file")
+        elif btn_id == "browse-input":
+            browse_mode = "folder" if self._get_input_mode() == "folder" else "file"
+            self._browse(browse_mode, "#input-source")
         elif btn_id == "browse-output":
             self._browse("folder", "#output-path")
         elif btn_id == "preset-jpg":
@@ -438,6 +482,7 @@ class ConverterApp(App):
             self._apply_user_preset(btn_id[8:])
 
     def _apply_preset(self, fmt: str, args: str, preset_name: str = ""):
+        self._current_preset = preset_name
         self.query_one("#format-select", Select).value = fmt
         self.query_one("#extra-args", TextArea).text = args
         if preset_name:
@@ -463,17 +508,15 @@ class ConverterApp(App):
             lambda result: self._on_browse_result(result, target_id, mode))
 
     def _on_browse_result(self, result, target_id, mode):
-        if result:
-            self.query_one(target_id, Input).value = result
-            if target_id == "#input-path":
-                self.query_one("#rb-folder", RadioButton).value = True
-                if not self.query_one("#output-path", Input).value:
-                    self.query_one("#output-path", Input).value = result
-            elif target_id == "#input-file":
-                self.query_one("#rb-file", RadioButton).value = True
-                if not self.query_one("#output-path", Input).value:
-                    self.query_one("#output-path", Input).value = str(
-                        Path(result).parent)
+        if not result:
+            return
+        self.query_one(target_id, Input).value = result
+        if target_id == "#input-source":
+            if not self.query_one("#output-path", Input).value:
+                p = Path(result)
+                self.query_one("#output-path", Input).value = (
+                    str(p.parent) if p.is_file() else result
+                )
 
     # ── Dialogs ───────────────────────────────────────────────────────────
 
@@ -529,20 +572,40 @@ class ConverterApp(App):
         return sorted(p for p in folder.glob("**/*" if recurse else "*")
                       if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
 
-    def _output_name(self, src: Path, fmt: str) -> str:
-        pre = self.query_one("#prefix", Input).value
-        suf = self.query_one("#suffix", Input).value
-        name = re.sub(r'[()\[\]{}]', '_', f"{pre}{src.stem}{suf}")
+    def _resolve_sequence(self, file_path: Path):
+        m = re.match(r'^(.*?)(\d+)$', file_path.stem)
+        if not m:
+            return None
+        prefix, digits = m.group(1), m.group(2)
+        pad = len(digits)
+        ext = file_path.suffix
+        files = sorted(
+            p for p in file_path.parent.glob(f"*{ext}")
+            if re.match(rf'^{re.escape(prefix)}\d+$', p.stem, re.IGNORECASE)
+        )
+        if not files:
+            return None
+        nums = [int(re.search(r'\d+$', p.stem).group()) for p in files]
+        return {
+            "pattern": file_path.parent / f"{prefix}%0{pad}d{ext}",
+            "start":   min(nums),
+            "count":   len(files),
+            "stem_prefix": prefix.rstrip("_"),
+        }
+
+    def _output_name(self, src: Path, fmt: str, index: int = 0) -> str:
+        template = self.query_one("#output-template", Input).value
+        name = self._resolve_token(template, src, fmt, index,
+                                   self._resolve_codec(), self._current_preset)
         return f"{name}.{fmt}"
 
     def _start_conversion(self):
         mode = self._get_input_mode()
-        inp = (self.query_one("#input-file", Input).value if mode == "file"
-               else self.query_one("#input-path", Input).value).strip()
+        inp_raw = self.query_one("#input-source", Input).value.strip()
         out = self.query_one("#output-path", Input).value.strip()
         fmt = self._get_format()
 
-        if not inp:
+        if not inp_raw:
             self.notify("Select an input folder or file", severity="error"); return
         if not out:
             self.notify("Set an output folder", severity="error"); return
@@ -550,9 +613,11 @@ class ConverterApp(App):
             self.notify("Select an output format", severity="error"); return
         if not self.has_magick and not self.has_ffmpeg:
             self.notify("No tools found — open Settings", severity="error"); return
-        inp_path = Path(inp)
+        inp_path = Path(inp_raw)
+        if mode == "folder" and inp_path.is_file():
+            inp_path = inp_path.parent
         if not inp_path.exists():
-            self.notify(f"Input not found: {inp}", severity="error"); return
+            self.notify(f"Input not found: {inp_raw}", severity="error"); return
 
         Path(out).mkdir(parents=True, exist_ok=True)
         self._save_session()
@@ -564,17 +629,73 @@ class ConverterApp(App):
         overwrite = self.query_one("#overwrite", Checkbox).value
         skip_same = self.query_one("#skip-same", Checkbox).value
         recurse = self.query_one("#recurse", Checkbox).value
-        prefix = self.query_one("#prefix", Input).value
-        suffix = self.query_one("#suffix", Input).value
+        output_template = self.query_one("#output-template", Input).value
+        codec = self._resolve_codec()
+        preset_name = self._current_preset
         extra = self._extra_args()
 
+        seq_info = None
+        if mode == "sequence":
+            seq_info = self._resolve_sequence(inp_path)
+            if seq_info is None:
+                self.notify("No numbered sequence found", severity="error")
+                self._done(); return
+
         self._run_conversion(inp_path, out, fmt, mode,
-                             overwrite, skip_same, recurse, prefix, suffix, extra)
+                             overwrite, skip_same, recurse,
+                             output_template, codec, preset_name, extra,
+                             seq_info)
 
     @work(exclusive=True, thread=True)
     def _run_conversion(self, inp, out, fmt, mode,
-                        overwrite, skip_same, recurse, prefix, suffix, extra):
+                        overwrite, skip_same, recurse,
+                        output_template, codec, preset_name, extra,
+                        seq_info=None):
         worker = get_current_worker()
+
+        if mode == "sequence":
+            dst_stem = self._resolve_token(output_template,
+                                           Path(seq_info["stem_prefix"]), fmt, 0,
+                                           codec, preset_name)
+            dst = Path(out) / f"{dst_stem}.{fmt}"
+            ff_exe = self._ff_cmd()
+            cmd = ([ff_exe, "-y",
+                    "-start_number", str(seq_info["start"]),
+                    "-i", str(seq_info["pattern"])]
+                   + extra + [str(dst)])
+            pb = self.query_one("#progress", ProgressBar)
+            self.call_from_thread(setattr, pb, "total", 1)
+            self.call_from_thread(pb.update, progress=0)
+            self.call_from_thread(
+                self._log,
+                f"SEQ:  {seq_info['pattern'].name}  ({seq_info['count']} frames) -> .{fmt}",
+                "header")
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                self.call_from_thread(
+                    self._log, f"$  {subprocess.list2cmdline(cmd)}", "dim")
+                if r.returncode != 0:
+                    lines = [l for l in
+                             (r.stderr or r.stdout or "error").strip().splitlines()
+                             if l.strip()]
+                    err = lines[-1] if lines else "conversion failed"
+                    self.call_from_thread(self._log, f"X  {err}", "err")
+                    self.call_from_thread(
+                        self.query_one("#summary", Static).update,
+                        "0 converted  |  0 skipped  |  1 failed")
+                else:
+                    self.call_from_thread(
+                        self._log, f"OK  {dst.name}", "ok")
+                    self.call_from_thread(
+                        self.query_one("#summary", Static).update,
+                        "1 converted  |  0 skipped  |  0 failed")
+            except subprocess.TimeoutExpired:
+                self.call_from_thread(self._log, "X  timed out (>300s)", "err")
+            except Exception as e:
+                self.call_from_thread(self._log, f"X  {e}", "err")
+            self.call_from_thread(pb.update, advance=1)
+            self.call_from_thread(self._done)
+            return
 
         if mode == "file":
             if inp.suffix.lower() not in ALL_EXTENSIONS:
@@ -607,15 +728,14 @@ class ConverterApp(App):
 
             src_ext = src.suffix.lower().lstrip(".")
 
-            if skip_same and src_ext == fmt and not prefix and not suffix:
+            if skip_same and src_ext == fmt and output_template.strip() in ("", "[inputFile]"):
                 self.call_from_thread(
                     self._log, f"skip  {src.name}  (already {fmt})", "dim")
                 skip += 1
                 self.call_from_thread(pb.update, advance=1)
                 continue
 
-            name = re.sub(r'[()\[\]{}]', '_',
-                          f"{prefix}{src.stem}{suffix}")
+            name = self._resolve_token(output_template, src, fmt, i, codec, preset_name)
             dst = Path(out) / f"{name}.{fmt}"
 
             if not overwrite and dst.exists():

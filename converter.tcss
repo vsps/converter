@@ -11,25 +11,6 @@ $c-fg-dim: #888888;
 $c-danger: #ff4d4d;
 $c-success: #47ffb0;
 
-/* ═══ Splash Screen ═════════════════════════════════════ */
-
-SplashScreen {
-    background: $c-bg;
-    align: center middle;
-}
-#splash-logo {
-    color: $c-accent;
-    text-style: bold;
-    content-align: center middle;
-    width: auto;
-}
-#splash-hint {
-    color: $c-muted;
-    content-align: center middle;
-    width: 100%;
-    margin-top: 2;
-}
-
 Screen {
     background: $c-bg;
 }
@@ -300,15 +281,15 @@ Bar > .bar--complete {
     min-width: 6;
 }
 
-/* ── Prefix / suffix ───────────────────────────────── */
+/* ── Output template ────────────────────────────────── */
 
-#ps-row {
-    layout: horizontal;
-    height: auto;
+#output-template {
+    margin-bottom: 0;
 }
-#ps-row .ps-col {
-    width: 1fr;
-    padding-right: 1;
+#token-hint {
+    color: $c-fg-dim;
+    height: 1;
+    margin-bottom: 1;
 }
 
 /* ── Format badge ───────────────────────────────────── */
