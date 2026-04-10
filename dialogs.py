@@ -37,12 +37,27 @@ _LOGO = """\
 """
 
 
+_PALETTE = [
+    "#e8ff47", "#47ffb0", "#ff4d4d", "#47b0ff", "#ff47e8", "#ffb047",
+]
+
 class SplashScreen(Screen):
     """Full-screen splash — dismissed by any key or click."""
 
+    _color_idx = 0
+
     def compose(self) -> ComposeResult:
-        yield Static(_LOGO, id="splash-logo")
-        yield Static("press any key", id="splash-hint")
+        with Vertical(id="splash-content"):
+            yield Static(_LOGO, id="splash-logo")
+            yield Static("press any key", id="splash-hint")
+
+    def on_mount(self) -> None:
+        self.set_interval(0.12, self._cycle)
+
+    def _cycle(self) -> None:
+        self._color_idx = (self._color_idx + 1) % len(_PALETTE)
+        self.query_one("#splash-logo", Static).styles.color = \
+            _PALETTE[self._color_idx]
 
     def on_key(self) -> None:
         self.dismiss()
@@ -70,12 +85,12 @@ class BrowseScreen(Screen):
             yield Static(label, id="browse-title")
             yield Button("[x]", id="browse-close-btn")
 
-        with Vertical(id="browse-path"):
+        with Horizontal(id="browse-path"):
             yield Input(value=self._resolve_start(),
-                        placeholder="path", id="browse-input")
+                        placeholder="path or \\\\server\\share", id="browse-input")
+            yield Button("go", id="browse-go-btn")
 
-        start = self._resolve_start()
-        yield DirectoryTree(start, id="browse-tree")
+        yield DirectoryTree(self._resolve_root(), id="browse-tree")
 
         with Horizontal(id="browse-footer"):
             yield Button("SELECT", id="browse-select-btn", classes="primary")
@@ -89,6 +104,22 @@ class BrowseScreen(Screen):
             p = Path.home()
         return str(p)
 
+    def _resolve_root(self) -> str:
+        """Return filesystem root so the tree is never restricted."""
+        return str(Path(self._resolve_start()).anchor or "/")
+
+    def _navigate_to(self, raw: str) -> None:
+        """Re-root the DirectoryTree to the given path if valid."""
+        p = Path(raw.strip())
+        if not p.exists():
+            return
+        if p.is_file():
+            p = p.parent
+        tree = self.query_one("#browse-tree", DirectoryTree)
+        tree.path = p
+        self.query_one("#browse-input", Input).value = str(p)
+        self._selected = str(p)
+
     def on_directory_tree_directory_selected(
             self, event: DirectoryTree.DirectorySelected) -> None:
         self.query_one("#browse-input", Input).value = str(event.path)
@@ -101,16 +132,18 @@ class BrowseScreen(Screen):
             self._selected = str(event.path)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id in ("browse-select-btn",):
+        bid = event.button.id
+        if bid == "browse-select-btn":
             val = self.query_one("#browse-input", Input).value.strip()
             self.dismiss(val if val else None)
-        elif event.button.id in ("browse-cancel-btn", "browse-close-btn"):
+        elif bid == "browse-go-btn":
+            self._navigate_to(self.query_one("#browse-input", Input).value)
+        elif bid in ("browse-cancel-btn", "browse-close-btn"):
             self.action_cancel()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "browse-input":
-            val = event.value.strip()
-            self.dismiss(val if val else None)
+            self._navigate_to(event.value)
 
     def action_cancel(self) -> None:
         self.dismiss(None)

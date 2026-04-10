@@ -34,7 +34,7 @@ from persistence import (
     ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS,
 )
 from scanner import probe_tool
-from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen
+from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen, SplashScreen
 
 
 def _plabel(name: str) -> str:
@@ -89,22 +89,28 @@ class ConverterApp(App):
                     )
                     with Horizontal(classes="browse-row"):
                         yield Input(placeholder="folder / file path", id="input-source")
-                        yield Button("..", id="browse-input")
+                        yield Button("\U0001F4C4", id="browse-input")
                 out_panel = Vertical(classes="panel")
                 out_panel.border_title = "OUTPUT"
                 with out_panel:
                     with Horizontal(classes="browse-row"):
                         yield Input(placeholder="output folder", id="output-path")
-                        yield Button("..", id="browse-output")
+                        yield Button("\U0001F4C4", id="browse-output")
                     yield Static("", classes="sep")
                     yield Checkbox("Overwrite existing", True, id="overwrite")
                     yield Checkbox("Skip if src = target fmt", True, id="skip-same")
                     yield Checkbox("Include subfolders", False, id="recurse")
                     yield Static("", classes="sep")
                     yield Input(placeholder="[inputFile]", id="output-template")
-                    yield Static(
-                        "tokens: [YYYYMMDD]  [inputFile]  [sequence]  [username]  [codec]  [preset]",
-                        id="token-hint")
+                    with Vertical(id="token-btns"):
+                        with Horizontal():
+                            yield Button(r"\[YYYYMMDD]", id="tok-YYYYMMDD", classes="token")
+                            yield Button(r"\[inputFile]", id="tok-inputFile", classes="token")
+                            yield Button(r"\[sequence]",  id="tok-sequence",  classes="token")
+                        # with Horizontal():
+                            yield Button(r"\[username]",  id="tok-username",  classes="token")
+                            yield Button(r"\[codec]",     id="tok-codec",     classes="token")
+                            yield Button(r"\[preset]",    id="tok-preset",    classes="token")
                     yield Static("", id="name-preview")
 
             # Col 2 — format + presets
@@ -136,10 +142,11 @@ class ConverterApp(App):
                 with args_panel:
                     yield TextArea(id="extra-args")
                     with Horizontal(classes="btn-row"):
-                        yield Button("ADD ARGS", id="args-btn")
-                    with Horizontal(id="save-preset-row"):
-                        yield Input(placeholder="name", id="preset-name",
-                                    max_length=30)
+                        yield Button("ARGUMENT LIBRARY", id="args-btn")
+                    with Horizontal(id="save-preset-row"):               
+                        preset_input =  Input(placeholder="name", id="preset-name", max_length=30)
+                        preset_input.border_title = "PRESET NAME"
+                        yield preset_input
                         yield Button("save", id="save-preset-btn")
                         yield Button("del", id="del-preset-btn", classes="danger")
                 yield ProgressBar(id="progress", total=100, show_eta=False)
@@ -168,6 +175,7 @@ class ConverterApp(App):
         self._restore_prefs()
         self._load_user_presets()
         self._ui_ready = True
+        self.push_screen(SplashScreen())
 
     def action_quit_app(self) -> None:
         self._save_session()
@@ -467,6 +475,13 @@ class ConverterApp(App):
             self._save_user_preset()
         elif btn_id == "del-preset-btn":
             self._delete_user_preset()
+        elif btn_id.startswith("tok-"):
+            token = "[" + btn_id[4:] + "]"
+            inp = self.query_one("#output-template", Input)
+            cur = inp.value
+            sep = "_" if cur and not cur.endswith("_") else ""
+            inp.value = cur + sep + token
+            inp.focus()
         elif btn_id == "browse-input":
             browse_mode = "folder" if self._get_input_mode() == "folder" else "file"
             self._browse(browse_mode, "#input-source")

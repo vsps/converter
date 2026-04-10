@@ -15,6 +15,30 @@ Screen {
     background: $c-bg;
 }
 
+/* ═══ Splash Screen ═════════════════════════════════════ */
+
+SplashScreen {
+    background: $c-bg;
+    align: center middle;
+}
+#splash-content {
+    width: auto;
+    height: auto;
+    align: center middle;
+}
+#splash-logo {
+    color: $c-accent;
+    text-style: bold;
+    text-align: center;
+    width: auto;
+}
+#splash-hint {
+    color: $c-muted;
+    text-align: center;
+    width: auto;
+    margin-top: 2;
+}
+
 /* ── Header ─────────────────────────────────────────── */
 
 #header-bar {
@@ -147,7 +171,7 @@ Button {
     color: $c-fg;
     border: none;
     min-width: 8;
-    height: 1;
+    height: 3;
 }
 Button:hover {
     background: $c-panel-hv;
@@ -181,7 +205,7 @@ Button:disabled {
 .browse-row {
     layout: horizontal;
     height: auto;
-    margin-bottom: 1;
+    margin: 1;
 }
 .browse-row Input {
     width: 1fr;
@@ -260,7 +284,8 @@ Bar > .bar--complete {
 #preset-vid-row Button {
     width: 1fr;
     min-width: 30;
-    margin-bottom: 0;
+    margin: 1;
+    height: 1;
     background: $c-border;
     color: $c-fg;
 }
@@ -286,10 +311,23 @@ Bar > .bar--complete {
 #output-template {
     margin-bottom: 0;
 }
-#token-hint {
-    color: $c-fg-dim;
-    height: 1;
+#token-btns {
+    height: auto;
+    margin-top: 1;
     margin-bottom: 1;
+}
+#token-btns Horizontal {
+    height: 1;
+    width: 1fr;
+}
+Button.token {
+    background: $c-bg;
+    color: $c-accent;
+    border: none;
+    width: auto;
+    min-width: 0;
+    height: 1;
+    margin-right: 1;
 }
 
 /* ── Format badge ───────────────────────────────────── */
@@ -567,11 +605,18 @@ BrowseScreen #browse-close-btn {
     min-width: 5;
 }
 BrowseScreen #browse-path {
+    layout: horizontal;
     padding: 0 2;
     margin-bottom: 1;
+    height: auto;
 }
 BrowseScreen #browse-path Input {
+    width: 1fr;
     margin-bottom: 0;
+}
+BrowseScreen #browse-go-btn {
+    min-width: 5;
+    margin-left: 1;
 }
 BrowseScreen DirectoryTree {
     height: 1fr;
