@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import app; print\\('app.py ok'\\)\")",
+      "Bash(python -c \"import screens; print\\('screens.py ok'\\)\")",
+      "Bash(python:*)",
+      "Bash(rm:*)",
+      "Bash(git push *)"
+    ]
+  }
+}

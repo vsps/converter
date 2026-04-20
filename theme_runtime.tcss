@@ -1,0 +1,11 @@
+/* auto-generated theme overrides */
+$c-bg: #101821;
+$c-panel: #131d27;
+$c-panel-hv: #192633;
+$c-border: #253445;
+$c-accent: #52d6ff;
+$c-muted: #3f4d5d;
+$c-fg: #dbe7f3;
+$c-fg-dim: #bbd0e5;
+$c-danger: #ff6b6b;
+$c-success: #4ef0b6;
