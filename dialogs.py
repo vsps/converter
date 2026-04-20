@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.screen import Screen, ModalScreen
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
-    Static, Input, Button, Select, TabbedContent, TabPane, DirectoryTree, ProgressBar,
+    Static, Input, Button, Select, TabbedContent, TabPane, DirectoryTree,
 )
 
 from scanner import (
@@ -20,7 +20,6 @@ from scanner import (
 )
 from persistence import (
     THEME_COLOR_KEYS,
-    THEME_SHIFT_KEYS,
     get_last_value,
     load_palettes,
     resolve_theme_state,
@@ -219,38 +218,6 @@ class ArgValueModal(ModalScreen):
         self.dismiss(token)
 
 
-class ShiftControl(Horizontal):
-    """Single-line shift control: label | [-] | ProgressBar | [+] | value%"""
-
-    def __init__(self, shift_key: str, label: str, value: int):
-        super().__init__(id=f"shift-{shift_key}", classes="shift-control")
-        self.shift_key = shift_key
-        self.label = label
-        self.value = max(0, min(100, int(value)))
-
-    def compose(self) -> ComposeResult:
-        yield Static(self.label, classes="shift-label")
-        yield Button("-", id=f"shift-{self.shift_key}-dec", classes="ghost shift-btn")
-        yield ProgressBar(total=100, show_eta=False, show_percentage=False,
-                          id=f"shift-{self.shift_key}-bar")
-        yield Button("+", id=f"shift-{self.shift_key}-inc", classes="ghost shift-btn")
-        yield Static("", id=f"shift-{self.shift_key}-value", classes="shift-value")
-
-    def on_mount(self) -> None:
-        self._refresh()
-
-    def set_value(self, value: int) -> None:
-        self.value = max(0, min(100, int(value)))
-        self._refresh()
-
-    def adjust(self, delta: int) -> None:
-        self.set_value(self.value + delta)
-
-    def _refresh(self) -> None:
-        self.query_one(f"#shift-{self.shift_key}-bar", ProgressBar).progress = self.value
-        self.query_one(f"#shift-{self.shift_key}-value", Static).update(f"{self.value}%")
-
-
 # ── Args Reference Screen ───────────────────────────────────────────────────
 
 class ArgRow(Static):
@@ -434,15 +401,6 @@ class SettingsScreen(Screen):
             "danger": "DANGER",
         }[key]
 
-    @staticmethod
-    def _shift_label(key: str) -> str:
-        return {
-            "panel": "Panel shift",
-            "panel_hv": "Panel hover shift",
-            "border": "Border shift",
-            "muted": "Muted text shift",
-        }[key]
-
     def compose(self) -> ComposeResult:
         yield Static("SETTINGS", id="settings-title")
         with VerticalScroll(id="settings-scroll"):
@@ -451,10 +409,6 @@ class SettingsScreen(Screen):
                     theme_panel = Vertical(classes="theme-panel")
                     theme_panel.border_title = "THEME"
                     with theme_panel:
-                        yield Static(
-                            "BG drives panel, hover, border, and muted. Luma shifts move down for light BG and up for dark BG.",
-                            classes="tool-hint",
-                        )
                         yield Select(
                             [(data["label"], name) for name, data in self.palettes.items()],
                             value=self.palette_state["palette_name"],
@@ -465,10 +419,10 @@ class SettingsScreen(Screen):
                             with Horizontal(classes="theme-color-row"):
                                 yield Static(self._theme_color_label(key), classes="theme-key")
                                 yield Input(value=self.palette_state["colors"][key], id=f"theme-{key}-input")
-                        yield Static("DERIVED SHIFTS", classes="section-label")
-                        with Vertical(classes="shift-group"):
-                            for key in THEME_SHIFT_KEYS:
-                                yield ShiftControl(key, self._shift_label(key), self.palette_state["shifts"][key])
+                        yield Static("DERIVED", classes="section-label")
+                        with Horizontal(classes="theme-color-row"):
+                            yield Static("OFFSET %", classes="theme-key")
+                            yield Input(value=str(self.palette_state["brightness"]), id="theme-brightness-input")
                         with Horizontal(classes="btn-row"):
                             yield Button("Reset Theme", id="theme-reset-btn", classes="ghost")
 
@@ -533,8 +487,6 @@ class SettingsScreen(Screen):
         try:
             for key in THEME_COLOR_KEYS:
                 self.query_one(f"#theme-{key}-input", Input).value = palette["colors"][key]
-            for key in THEME_SHIFT_KEYS:
-                self.query_one(f"#shift-{key}", ShiftControl).set_value(palette["shifts"][key])
         except Exception:
             return
 
@@ -559,10 +511,6 @@ class SettingsScreen(Screen):
             palette_value = self.query_one("#theme-palette", Select).value
             if palette_value != Select.BLANK:
                 self._load_palette_into_controls(str(palette_value))
-        elif btn and btn.startswith("shift-") and btn.endswith(("-dec", "-inc")):
-            _, key, direction = btn.split("-", 2)
-            delta = -5 if direction == "dec" else 5
-            self.query_one(f"#shift-{key}", ShiftControl).adjust(delta)
         elif btn == "im-test-btn":
             self._probe_tool("im")
         elif btn == "ff-test-btn":
@@ -618,15 +566,15 @@ class SettingsScreen(Screen):
             if color != palette["colors"][key]:
                 theme_colors[key] = color
 
-        theme_shifts = {}
-        for key in THEME_SHIFT_KEYS:
-            value = self.query_one(f"#shift-{key}", ShiftControl).value
-            if value != palette["shifts"][key]:
-                theme_shifts[key] = value
+        try:
+            brightness = max(0, min(50, int(self.query_one("#theme-brightness-input", Input).value)))
+        except (ValueError, TypeError):
+            self.notify("Offset must be 0–50", severity="error")
+            return
 
         self.prefs["theme_palette"] = palette_name
         self.prefs["theme_colors"] = theme_colors
-        self.prefs["theme_shifts"] = theme_shifts
+        self.prefs["theme_brightness"] = brightness
         save_prefs(self.prefs)
         self.dismiss(self.prefs)
 

@@ -16,61 +16,23 @@ PRESETS_FILE     = APP_DIR / "converter_presets.json"
 PALETTES_FILE    = APP_DIR / "palettes.json"
 
 THEME_COLOR_KEYS = ("bg", "text", "accent", "success", "danger")
-THEME_SHIFT_KEYS = ("panel", "panel_hv", "border", "muted")
-
-DERIVED_TOKEN_RULES = {
-    "panel": {"hue": 0.00, "sat": -0.04, "lum": 0.08},
-    "panel_hv": {"hue": 0.00, "sat": -0.02, "lum": 0.13},
-    "border": {"hue": 0.00, "sat": -0.08, "lum": 0.20},
-    "muted": {"hue": 0.00, "sat": -0.22, "lum": 0.30},
-}
-FG_DIM_RULE = {"hue": 0.00, "sat": -0.10, "lum": 0.20}
-FG_DIM_AMOUNT = 45
 
 DEFAULT_PALETTES = {
     "default": {
         "label": "Default Lime",
-        "colors": {
-            "bg": "#0f0f0f",
-            "text": "#e0e0e0",
-            "accent": "#e8ff47",
-            "success": "#47ffb0",
-            "danger": "#ff4d4d",
-        },
-        "shifts": {"panel": 26, "panel_hv": 44, "border": 58, "muted": 72},
+        "colors": {"bg": "#0f0f0f", "text": "#e0e0e0", "accent": "#e8ff47", "success": "#47ffb0", "danger": "#ff4d4d"},
     },
     "ocean": {
         "label": "Ocean",
-        "colors": {
-            "bg": "#101821",
-            "text": "#dbe7f3",
-            "accent": "#52d6ff",
-            "success": "#4ef0b6",
-            "danger": "#ff6b6b",
-        },
-        "shifts": {"panel": 24, "panel_hv": 42, "border": 56, "muted": 70},
+        "colors": {"bg": "#101821", "text": "#dbe7f3", "accent": "#52d6ff", "success": "#4ef0b6", "danger": "#ff6b6b"},
     },
     "ember": {
         "label": "Ember",
-        "colors": {
-            "bg": "#18110f",
-            "text": "#f3e2d6",
-            "accent": "#ffb347",
-            "success": "#79f0b2",
-            "danger": "#ff6a5e",
-        },
-        "shifts": {"panel": 22, "panel_hv": 38, "border": 52, "muted": 66},
+        "colors": {"bg": "#18110f", "text": "#f3e2d6", "accent": "#ffb347", "success": "#79f0b2", "danger": "#ff6a5e"},
     },
     "paper": {
         "label": "Paper",
-        "colors": {
-            "bg": "#f1eadf",
-            "text": "#1d1b17",
-            "accent": "#106d5d",
-            "success": "#237a57",
-            "danger": "#a93434",
-        },
-        "shifts": {"panel": 18, "panel_hv": 30, "border": 40, "muted": 58},
+        "colors": {"bg": "#f1eadf", "text": "#1d1b17", "accent": "#106d5d", "success": "#237a57", "danger": "#a93434"},
     },
 }
 
@@ -151,6 +113,39 @@ def save_presets(presets):
         pass
 
 
+def _hex_to_rgb(value):
+    value = value.lstrip("#")
+    return tuple(int(value[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def _rgb_to_hex(rgb):
+    return "#" + "".join(f"{round(_clamp(c, 0.0, 1.0) * 255):02x}" for c in rgb)
+
+
+def _derive_input(bg_hex, pct):
+    r, g, b = _hex_to_rgb(bg_hex)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    shift = pct / 250.0
+    l = _clamp(l - shift if l > 0.5 else l + shift, 0.0, 1.0)
+    return _rgb_to_hex(colorsys.hls_to_rgb(h, l, s))
+
+
+def _derive_border(bg_hex, pct):
+    r, g, b = _hex_to_rgb(bg_hex)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    shift = pct / 100.0
+    l = _clamp(l - shift if l > 0.5 else l + shift, 0.0, 1.0)
+    return _rgb_to_hex(colorsys.hls_to_rgb(h, l, s))
+
+
+def _derive_dim(fg_hex, bg_hex):
+    r, g, b = _hex_to_rgb(fg_hex)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    _, bg_l, _ = colorsys.rgb_to_hls(*_hex_to_rgb(bg_hex))
+    l = l + (bg_l - l) * 0.4
+    return _rgb_to_hex(colorsys.hls_to_rgb(h, l, s))
+
+
 def _clamp(value, low, high):
     return max(low, min(high, value))
 
@@ -172,26 +167,6 @@ def _normalize_hex(value):
     return text.lower()
 
 
-def _hex_to_rgb(value):
-    value = value.lstrip("#")
-    return tuple(int(value[index:index + 2], 16) / 255 for index in (0, 2, 4))
-
-
-def _rgb_to_hex(rgb):
-    return "#" + "".join(f"{round(_clamp(channel, 0.0, 1.0) * 255):02x}" for channel in rgb)
-
-
-def _apply_shift(source_hex, amount, rule):
-    scale = _clamp(float(amount), 0.0, 100.0) / 100.0
-    red, green, blue = _hex_to_rgb(source_hex)
-    hue, light, sat = colorsys.rgb_to_hls(red, green, blue)
-    hue = (hue + rule["hue"] * scale) % 1.0
-    sat = _clamp(sat + rule["sat"] * scale, 0.0, 1.0)
-    light_dir = -1.0 if light > 0.5 else 1.0
-    light = _clamp(light + light_dir * abs(rule["lum"]) * scale, 0.0, 1.0)
-    return _rgb_to_hex(colorsys.hls_to_rgb(hue, light, sat))
-
-
 def _sanitize_palette(name, data):
     if not isinstance(data, dict):
         return None
@@ -202,17 +177,9 @@ def _sanitize_palette(name, data):
         if not color:
             return None
         colors[key] = color
-    shifts = {}
-    raw_shifts = data.get("shifts", {})
-    for key in THEME_SHIFT_KEYS:
-        try:
-            shifts[key] = int(_clamp(int(raw_shifts.get(key, 0)), 0, 100))
-        except Exception:
-            return None
     return {
         "label": str(data.get("label", name.replace("_", " ").title())),
         "colors": colors,
-        "shifts": shifts,
     }
 
 
@@ -247,36 +214,26 @@ def resolve_theme_state(prefs):
             if normalized:
                 colors[key] = normalized
 
-    shifts = dict(palette["shifts"])
-    for key, value in prefs.get("theme_shifts", {}).items():
-        if key in THEME_SHIFT_KEYS:
-            try:
-                shifts[key] = int(_clamp(int(value), 0, 100))
-            except Exception:
-                continue
-
     return {
         "palette_name": palette_name,
         "palette": palette,
         "palettes": palettes,
         "colors": colors,
-        "shifts": shifts,
+        "brightness": int(_clamp(prefs.get("theme_brightness", 25), 0, 50)),
     }
 
 
 def resolve_theme_tokens(prefs):
     state = resolve_theme_state(prefs)
     colors = state["colors"]
-    shifts = state["shifts"]
+    pct = state["brightness"]
     return {
         "c-bg": colors["bg"],
-        "c-panel": _apply_shift(colors["bg"], shifts["panel"], DERIVED_TOKEN_RULES["panel"]),
-        "c-panel-hv": _apply_shift(colors["bg"], shifts["panel_hv"], DERIVED_TOKEN_RULES["panel_hv"]),
-        "c-border": _apply_shift(colors["bg"], shifts["border"], DERIVED_TOKEN_RULES["border"]),
+        "c-input": _derive_input(colors["bg"], pct),
+        "c-border": _derive_border(colors["bg"], pct),
         "c-accent": colors["accent"],
-        "c-muted": _apply_shift(colors["bg"], shifts["muted"], DERIVED_TOKEN_RULES["muted"]),
         "c-fg": colors["text"],
-        "c-fg-dim": _apply_shift(colors["text"], FG_DIM_AMOUNT, FG_DIM_RULE),
+        "c-dim": _derive_dim(colors["text"], colors["bg"]),
         "c-danger": colors["danger"],
         "c-success": colors["success"],
     }

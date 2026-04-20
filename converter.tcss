@@ -4,10 +4,9 @@ Screen {
     background: $c-bg;
 }
 
-/* ═══ Splash Screen ═════════════════════════════════════ */
+/* ═══ Splash ══════════════════════════════════════════════ */
 
 SplashScreen {
-    background: $c-bg;
     align: center middle;
 }
 #splash-content {
@@ -22,7 +21,7 @@ SplashScreen {
     width: auto;
 }
 #splash-hint {
-    color: $c-muted;
+    color: $c-dim;
     text-align: center;
     width: auto;
     margin-top: 2;
@@ -33,8 +32,8 @@ SplashScreen {
 #header-bar {
     dock: top;
     height: 3;
-    background: $c-bg;
-    padding: 0 2;
+    padding: 0 1;
+    margin: 0;
     layout: horizontal;
     align: left middle;
 }
@@ -42,181 +41,167 @@ SplashScreen {
     color: $c-accent;
     text-style: bold;
     width: auto;
+    margin: 0 3 0 0;
 }
 #header-bar #tool-status {
-    color: $c-fg-dim;
+    color: $c-dim;
     width: auto;
-    margin-left: 2;
+    margin: 0;
+}
+#header-bar #header-btns {
+    dock: right;
+    width: auto;
+    height: auto;
+    align: right middle;
 }
 #header-bar #settings-btn {
-    dock: right;
     min-width: 10;
-    background: $c-panel;
-    color: $c-fg;
-    text-style: bold;
-    border: tall $c-border;
-}
-#header-bar #settings-btn:hover {
-    background: $c-panel-hv;
-    color: $c-accent;
-    border: tall $c-border;
-}
-#header-bar #settings-btn:focus {
-    background: $c-panel-hv;
-    color: $c-accent;
-    border: tall $c-accent;
 }
 
-/* ── Three-column layout ────────────────────────────── */
+
+/* ── Layout ─────────────────────────────────────────── */
 
 #columns {
     layout: horizontal;
     height: 1fr;
-    padding: 1 2 0 2;
+    padding: 0 1;
 }
 #col1, #col2, #col3 {
     width: 1fr;
-    padding: 0 1;
+    padding: 0;
 }
 
-/* ── Panel styling ──────────────────────────────────── */
+/* ── Panels ─────────────────────────────────────────── */
 
-.panel {
-    background: $c-panel;
+.panel,
+SettingsScreen .tool-panel,
+SettingsScreen .theme-panel,
+SettingsScreen .rebuild-panel {
     border: solid $c-border;
     border-title-color: $c-accent;
     border-title-style: bold;
-    padding: 1 2;
-    margin-bottom: 1;
+    padding: 0;
+}
+.panel {
+    margin: 0;
+}
+SettingsScreen .tool-panel,
+SettingsScreen .theme-panel,
+SettingsScreen .rebuild-panel {
+    margin: 0;
 }
 .panel-label {
-    color: $c-muted;
+    color: $c-dim;
     text-style: bold;
-    margin-bottom: 1;
+    margin: 0;
 }
 
 /* ── Inputs ─────────────────────────────────────────── */
 
+Input, TextArea {
+    background: $c-input;
+    color: $c-fg;
+    border: solid $c-border;
+}
 Input {
-    background: $c-bg;
-    color: $c-fg;
-    border: tall $c-border;
-    margin-bottom: 1;
+    margin: 0;
 }
-Input:focus {
-    border: tall $c-accent;
-}
-
 TextArea {
-    background: $c-bg;
-    color: $c-fg;
-    border: tall $c-border;
-    height: 4;
+    height: 8;
 }
-TextArea:focus {
-    border: tall $c-accent;
+Input:focus, TextArea:focus {
+    border: solid $c-accent;
 }
 
 /* ── RadioSet ───────────────────────────────────────── */
 
 RadioSet {
-    background: $c-panel;
+    background: $c-bg;
     border: none;
     height: auto;
     padding: 0;
 }
 RadioButton {
-    background: $c-panel;
+    background: $c-bg;
     color: $c-fg;
     padding: 0;
-}
-RadioButton:hover {
-    background: $c-panel-hv;
 }
 
 /* ── Select ─────────────────────────────────────────── */
 
 Select {
-    background: $c-bg;
-    border: tall $c-border;
-    margin-bottom: 1;
+    background: $c-input;
+    border: solid $c-border;
+    margin: 0;
 }
 Select:focus {
-    border: tall $c-accent;
+    border: solid $c-accent;
 }
 SelectOverlay {
-    background: $c-panel;
-    border: tall $c-border;
+    background: $c-input;
+    border: solid $c-border;
 }
 SelectCurrent {
-    background: $c-bg;
+    background: $c-input;
     color: $c-fg;
 }
 
 /* ── Checkbox ───────────────────────────────────────── */
 
 Checkbox {
-    background: $c-panel;
+    background: $c-bg;
     color: $c-fg;
     padding: 0;
     height: auto;
     border: none;
 }
-Checkbox:hover {
-    background: $c-panel-hv;
-}
 
 /* ── Buttons ────────────────────────────────────────── */
 
 Button {
-    background: $c-border;
+    background: $c-bg;
     color: $c-fg;
-    border: none;
+    border: solid $c-fg;
     min-width: 8;
     height: 3;
 }
-Button:hover {
-    background: $c-panel-hv;
-}
 Button.primary {
-    background: $c-accent;
-    color: $c-bg;
+    color: $c-accent;
+    border: solid $c-accent;
     text-style: bold;
 }
-Button.primary:hover {
-    background: $c-accent;
-    color: $c-bg;
-}
 Button.ghost {
-    background: $c-bg;
-    color: $c-fg-dim;
-}
-Button.ghost:hover {
-    background: $c-panel;
+    color: $c-dim;
+    border: solid $c-dim;
 }
 Button.danger {
-    background: $c-danger;
-    color: $c-bg;
+    background: $c-bg;
+    color: $c-danger;
+    border: solid $c-danger;
+}
+Button:focus {
+    border: solid $c-accent;
 }
 Button:disabled {
     opacity: 40%;
 }
 
-/* ── Browse buttons ─────────────────────────────────── */
+/* ── Browse row ─────────────────────────────────────── */
 
 .browse-row {
     layout: horizontal;
     height: auto;
-    margin: 1;
+    margin: 0;
 }
 .browse-row Input {
     width: 1fr;
-    margin-bottom: 0;
+    margin: 0;
 }
 .browse-row Button {
-    min-width: 4;
-    width: 4;
-    margin-left: 1;
+    min-width: 6;
+    width: 6;
+    margin: 0;
+    border: solid $c-dim;
 }
 
 /* ── ProgressBar ────────────────────────────────────── */
@@ -239,21 +224,36 @@ Bar > .bar--complete {
     color: $c-success;
 }
 
-/* ── Button rows ────────────────────────────────────── */
+/* ── Utility ────────────────────────────────────────── */
 
 .btn-row {
     layout: horizontal;
     height: auto;
-    margin-top: 1;
+    margin: 0;
 }
 .btn-row Button {
-    margin-right: 1;
+    margin: 0;
 }
 #quit-btn {
-    dock: right;
-    margin-right: 0;
+    margin: 0;
 }
-/* ── Input ────────────────────────────────────────── */
+#convert-btn {
+    color: $c-dim;
+    border: solid $c-dim;
+    text-style: bold;
+}
+#status {
+    content-align: left middle;
+    width: 1fr;
+    margin: 0;
+}
+.sep {
+    height: 1;
+    background: $c-border;
+    margin: 0;
+}
+
+/* ── Input panel ────────────────────────────────────── */
 
 #input-panel {
 	height: auto;
@@ -272,10 +272,10 @@ Bar > .bar--complete {
     scrollbar-size: 1 1;
 }
 .preset-group-hdr {
-    color: $c-muted;
+    color: $c-dim;
     text-style: bold;
-    margin-top: 1;
-    padding: 0 1;
+    margin-top: 0;
+    padding: 0;
 }
 #preset-img-row,
 #preset-vid-row {
@@ -286,9 +286,10 @@ Bar > .bar--complete {
 #preset-vid-row Button {
     width: 1fr;
     min-width: 30;
-    margin: 1;
+    margin: 0;
     height: 1;
-    background: $c-border;
+    border: none;
+    background: $c-input;
     color: $c-fg;
 }
 
@@ -297,26 +298,36 @@ Bar > .bar--complete {
 #save-preset-row {
     layout: horizontal;
     height: auto;
-    margin-top: 1;
+    margin-top: 0;
 }
 #save-preset-row Input {
     width: 1fr;
     margin-bottom: 0;
+    border-title-color: $c-accent;
+    border-title-style: bold;
 }
 #save-preset-row Button {
-    margin-left: 1;
+    margin-left: 0;
     min-width: 6;
+}
+
+#save-preset-btn {
+	    color: $c-dim;
+	    border: solid $c-dim;
+}
+#del-preset-btn {
+	    color: $c-danger;
+	    border: solid $c-danger;
 }
 
 /* ── Output template ────────────────────────────────── */
 
 #output-template {
-    margin-bottom: 0;
+    margin: 0;
 }
 #token-btns {
     height: auto;
-    margin-top: 1;
-    margin-bottom: 1;
+    margin: 0;
 }
 #token-btns Horizontal {
     height: 1;
@@ -329,32 +340,25 @@ Button.token {
     width: auto;
     min-width: 0;
     height: 1;
-    margin-right: 1;
+    margin: 0;
 }
 
-/* ── Format badge ───────────────────────────────────── */
+/* ── Inline status labels ───────────────────────────── */
 
-#fmt-badge {
-    color: $c-fg-dim;
+#fmt-badge, #name-preview {
+    color: $c-dim;
     height: 1;
-    margin-bottom: 1;
 }
-
-/* ── Name preview ───────────────────────────────────── */
-
-#name-preview {
-    color: $c-fg-dim;
-    height: 1;
-    margin-top: 1;
-}
-
-/* ── Status ─────────────────────────────────────────── */
-
 #status {
-    color: $c-fg-dim;
-    height: 1;
-    margin-top: 1;
+    color: $c-dim;
 }
+#fmt-badge {
+	margin: 1 0;
+}
+
+#name-preview, #status {
+	margin: 1 1;
+	}
 
 /* ── Log area ───────────────────────────────────────── */
 
@@ -362,72 +366,58 @@ Button.token {
     dock: bottom;
     height: auto;
     max-height: 50%;
-    padding: 0 2;
+    padding: 0;
 }
 #log-bar {
     layout: horizontal;
     height: 1;
-    margin-top: 1;
+    margin: 0;
 }
 #log-bar #log-label {
-    color: $c-muted;
+    color: $c-dim;
     text-style: bold;
     width: auto;
 }
 #log-bar #summary {
-    color: $c-fg-dim;
+    color: $c-dim;
     width: 1fr;
-    margin-left: 2;
+    margin: 0;
 }
 #log-bar #clear-btn {
     dock: right;
     min-width: 6;
+    height: 1;
+    border: none;
 }
-
 #cmd-preview {
     height: 1;
-    padding: 0 2;
-    color: $c-fg-dim;
-    margin-top: 1;
+    padding: 0;
+    color: $c-dim;
+    margin: 0;
 }
-
 RichLog {
-    background: $c-panel;
+    background: $c-bg;
     border: solid $c-border;
-    height: 25;
-    margin-top: 1;
-    margin-bottom: 1;
+    height: 20;
+    margin: 0;
     scrollbar-size: 1 1;
 }
-
-/* ── Separator ──────────────────────────────────────── */
-
-.sep {
-    height: 1;
-    background: $c-border;
-    margin: 1 0;
-}
-
-/* ── Args button ────────────────────────────────────── */
-
 #args-btn {
-    min-width: 6;
-    background: $c-border;
-    color: $c-accent;
-    border: none;
+    width: 1fr;
+    color: $c-dim;
+    border: solid $c-dim;
 }
 
 /* ═══ Settings Screen ═══════════════════════════════════ */
 
 SettingsScreen {
-    background: $c-bg;
     layout: vertical;
     height: 100%;
 }
 SettingsScreen #settings-title {
     color: $c-accent;
     text-style: bold;
-    margin: 0 2;
+    margin: 0;
 }
 SettingsScreen #settings-scroll {
     height: 1fr;
@@ -442,112 +432,57 @@ SettingsScreen #settings-columns {
 SettingsScreen #settings-col-left,
 SettingsScreen #settings-col-right {
     width: 1fr;
-    padding: 0 1;
+    padding: 0;
 }
-SettingsScreen .tool-panel {
-    background: $c-panel;
-    border: solid $c-border;
-    border-title-color: $c-accent;
-    border-title-style: bold;
-    padding: 1 2;
-    margin: 0 1 1 1;
+SettingsScreen .tool-panel .tool-hint,
+SettingsScreen .tool-panel .tool-status,
+SettingsScreen .rebuild-panel .rebuild-status {
+    color: $c-dim;
 }
-SettingsScreen .tool-panel .tool-hint {
-    color: $c-muted;
+SettingsScreen .tool-panel .tool-status {
+    width: auto;
+    margin: 0;
 }
 SettingsScreen .tool-panel .tool-row {
     layout: horizontal;
     height: auto;
-    margin-top: 0;
+    margin: 0;
 }
 SettingsScreen .tool-panel .tool-row Input {
     width: 1fr;
 }
-SettingsScreen .tool-panel .tool-status {
-    color: $c-fg-dim;
-    width: auto;
-    margin-top: 0;
-}
-SettingsScreen .theme-panel {
-    background: $c-panel;
-    border: solid $c-border;
-    border-title-color: $c-accent;
-    border-title-style: bold;
-    padding: 1 2;
-    margin: 0 1 1 1;
+SettingsScreen .rebuild-panel .rebuild-status {
+    margin: 0;
 }
 SettingsScreen .theme-color-row {
     layout: horizontal;
     height: auto;
-    margin-top: 1;
-}
-SettingsScreen .section-label {
-    color: $c-muted;
-    text-style: bold;
-    margin-top: 1;
+    margin: 0;
 }
 SettingsScreen .theme-color-row Input {
     width: 1fr;
 }
+SettingsScreen .section-label {
+    color: $c-dim;
+    text-style: bold;
+    margin: 0;
+}
 SettingsScreen .theme-key {
-    color: $c-muted;
+    color: $c-dim;
     text-style: bold;
     width: 10;
     content-align: left middle;
-}
-SettingsScreen .shift-group {
-    margin-top: 1;
-}
-SettingsScreen .shift-control {
-    height: 1;
-    layout: horizontal;
-    margin-top: 1;
-}
-SettingsScreen .shift-label {
-    color: $c-muted;
-    width: 10;
-    content-align: left middle;
-}
-SettingsScreen .shift-control ProgressBar {
-    width: 1fr;
-    padding: 0;
-}
-SettingsScreen .shift-control ProgressBar Bar {
-    color: $c-accent;
-    background: $c-panel-hv;
-}
-SettingsScreen .shift-btn {
-    min-width: 3;
-    width: 3;
-    margin: 0 1;
-}
-SettingsScreen .shift-value {
-    color: $c-fg-dim;
-    width: 5;
-    content-align: right middle;
-}
-SettingsScreen .rebuild-panel {
-    background: $c-panel;
-    border: solid $c-border;
-    border-title-color: $c-accent;
-    border-title-style: bold;
-    padding: 1 2;
-    margin: 0 1 1 1;
-}
-SettingsScreen .rebuild-panel .rebuild-status {
-    color: $c-fg-dim;
-    margin-top: 1;
+    margin: 1 0 0 0;
 }
 SettingsScreen #settings-footer {
     layout: horizontal;
     height: auto;
-    margin: 1 2;
+    margin: 0;
 }
 
 /* ═══ Args Reference Screen ═════════════════════════════ */
 
 ArgsReferenceScreen {
-    background: $c-bg;
     layout: vertical;
     overflow: hidden hidden;
 }
@@ -557,7 +492,7 @@ ArgsReferenceScreen TabbedContent {
 ArgsReferenceScreen #args-ref-header {
     layout: horizontal;
     height: auto;
-    padding: 1 2;
+    padding: 0;
 }
 ArgsReferenceScreen #args-ref-title {
     color: $c-accent;
@@ -565,48 +500,43 @@ ArgsReferenceScreen #args-ref-title {
     width: auto;
 }
 ArgsReferenceScreen #args-ref-info {
-    color: $c-fg-dim;
+    color: $c-dim;
     width: auto;
-    margin-left: 2;
+    margin: 0;
 }
 ArgsReferenceScreen #args-ref-footer {
     dock: bottom;
     layout: horizontal;
     height: auto;
-    margin: 1 2;
+    margin: 0;
 }
 ArgsReferenceScreen #search-bar {
     layout: horizontal;
     height: auto;
-    padding: 0 2;
-    margin-bottom: 1;
+    padding: 0;
+    margin: 0;
 }
 ArgsReferenceScreen #search-bar Input {
     width: 1fr;
 }
 ArgsReferenceScreen #search-bar #search-count {
-    color: $c-fg-dim;
+    color: $c-dim;
     width: auto;
-    margin-left: 1;
+    margin: 0;
     content-align: right middle;
 }
-
 ArgsReferenceScreen ContentSwitcher {
     height: 1fr;
 }
 ArgsReferenceScreen TabPane {
     padding: 0;
 }
-
 .arg-row {
     layout: horizontal;
     height: auto;
-    padding: 0 2;
-    background: $c-panel;
-    margin: 0 2;
-}
-.arg-row:hover {
-    background: $c-panel-hv;
+    padding: 0;
+    background: $c-bg;
+    margin: 0;
 }
 .arg-row .arg-flag {
     color: $c-accent;
@@ -618,15 +548,14 @@ ArgsReferenceScreen TabPane {
     width: 1fr;
 }
 .arg-row .arg-last {
-    color: $c-muted;
+    color: $c-dim;
     width: auto;
 }
-
 .section-hdr {
     color: $c-accent;
     text-style: bold;
-    padding: 1 2;
-    margin-top: 1;
+    padding: 0;
+    margin: 0;
 }
 
 /* ═══ ArgValue Modal ════════════════════════════════════ */
@@ -635,9 +564,9 @@ ArgValueModal {
     align: center middle;
 }
 #arg-value-dialog {
-    background: $c-panel;
+    background: $c-bg;
     border: solid $c-border;
-    padding: 1 2;
+    padding: 0;
     width: 60;
     height: auto;
     max-height: 20;
@@ -646,30 +575,25 @@ ArgValueModal {
     color: $c-accent;
     text-style: bold;
 }
-#arg-value-dialog #av-hint {
-    color: $c-fg-dim;
-}
-#arg-value-dialog #av-desc {
-    color: $c-fg-dim;
-    margin-bottom: 1;
-}
+#arg-value-dialog #av-hint,
+#arg-value-dialog #av-desc,
 #arg-value-dialog #av-last {
-    color: $c-muted;
-    margin-bottom: 1;
+    color: $c-dim;
+}
+#arg-value-dialog #av-desc,
+#arg-value-dialog #av-last {
+    margin: 0;
 }
 #arg-value-dialog .btn-row {
-    margin-top: 1;
+    margin: 0;
 }
 
 /* ═══ Browse Screen ═════════════════════════════════════ */
 
-BrowseScreen {
-    background: $c-bg;
-}
 BrowseScreen #browse-header {
     layout: horizontal;
     height: auto;
-    padding: 1 2;
+    padding: 0;
 }
 BrowseScreen #browse-title {
     color: $c-accent;
@@ -683,27 +607,26 @@ BrowseScreen #browse-close-btn {
 }
 BrowseScreen #browse-path {
     layout: horizontal;
-    padding: 0 2;
-    margin-bottom: 1;
+    padding: 0;
+    margin: 0;
     height: auto;
 }
 BrowseScreen #browse-path Input {
     width: 1fr;
-    margin-bottom: 0;
+    margin: 0;
 }
 BrowseScreen #browse-go-btn {
     min-width: 5;
-    margin-left: 1;
+    margin: 0;
 }
 BrowseScreen DirectoryTree {
     height: 1fr;
-    margin: 0 2;
-    background: $c-panel;
+    margin: 0;
     border: solid $c-border;
     scrollbar-size: 1 1;
 }
 BrowseScreen #browse-footer {
     layout: horizontal;
     height: auto;
-    margin: 1 2;
+    margin: 0;
 }

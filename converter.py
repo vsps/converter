@@ -39,8 +39,7 @@ from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen, SplashScr
 
 
 def _plabel(name: str) -> str:
-    """Pad preset name to 12 chars with dots for left-aligned appearance."""
-    return name[:30].ljust(30, ".")
+    return f"\\[{name[:28]}]".ljust(30)
 
 
 def _preset_sort_key(p):
@@ -77,14 +76,16 @@ class ConverterApp(App):
         with Horizontal(id="header-bar"):
             yield Static("BATCH CONVERTER", id="title")
             yield Static("", id="tool-status")
-            yield Button("settings", id="settings-btn")
+            with Horizontal(id="header-btns"):
+                yield Button("settings", id="settings-btn", classes="ghost")
+                yield Button("quit", id="quit-btn", classes="ghost")
 
         # Three columns
         with Horizontal(id="columns"):
             # Col 1 — input + output + options
             with Vertical(id="col1"):
                 inp_panel = Vertical(classes="panel", id="input-panel")
-                inp_panel.border_title = "INPUT SOURCE"
+                inp_panel.border_title = "INPUT"
                 with inp_panel:
                     yield RadioSet(
                         RadioButton("FOLDER", value=True, id="rb-folder"),
@@ -101,11 +102,9 @@ class ConverterApp(App):
                     with Horizontal(classes="browse-row"):
                         yield Input(placeholder="output folder", id="output-path")
                         yield Button("\U0001F4C4", id="browse-output")
-                    yield Static("", classes="sep")
                     yield Checkbox("Overwrite existing", True, id="overwrite")
                     yield Checkbox("Skip if src = target fmt", True, id="skip-same")
                     yield Checkbox("Include subfolders", False, id="recurse")
-                    yield Static("", classes="sep")
                     yield Input(placeholder="[inputFile]", id="output-template")
                     with Vertical(id="token-btns"):
                         with Horizontal():
@@ -117,9 +116,6 @@ class ConverterApp(App):
                             yield Button(r"\[codec]",     id="tok-codec",     classes="token")
                             yield Button(r"\[preset]",    id="tok-preset",    classes="token")
                     yield Static("", id="name-preview")
-
-            # Col 2 — format + presets
-            with Vertical(id="col2"):
                 fmt_panel = Vertical(classes="panel", id="format-panel")
                 fmt_panel.border_title = "FORMAT"
                 with fmt_panel:
@@ -128,6 +124,9 @@ class ConverterApp(App):
                         value="png", id="format-select",
                     )
                     yield Static("img", id="fmt-badge")
+
+            # Col 2 — presets
+            with Vertical(id="col2"):
                 preset_panel = Vertical(classes="panel", id="preset-panel")
                 preset_panel.border_title = "PRESETS"
                 with preset_panel:
@@ -156,10 +155,9 @@ class ConverterApp(App):
                         yield Button("del", id="del-preset-btn", classes="danger")
                 yield ProgressBar(id="progress", total=100, show_eta=False)
                 with Horizontal(classes="btn-row"):
-                    yield Button("CONVERT", id="convert-btn", classes="primary")
+                    yield Button("CONVERT", id="convert-btn")
                     yield Button("CANCEL", id="cancel-btn", disabled=True)
-                    yield Button("QUIT", id="quit-btn", classes="ghost")
-                yield Static("ready", id="status")
+                    yield Static("ready", id="status")
 
         # Command preview + log
         yield Static("", id="cmd-preview")

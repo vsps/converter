@@ -3,5 +3,10 @@
     "name": "80K",
     "format": "mp4",
     "args": "-c:v libx264 -crf 24 -preset fast -b:v 80K"
+  },
+  {
+    "name": "mp4_40K",
+    "format": "mp4",
+    "args": "-c:v libx264 -crf 23 -preset fast -b:v 40k"
   }
 ]

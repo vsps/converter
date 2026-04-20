@@ -7,12 +7,6 @@
       "accent": "#e8ff47",
       "success": "#47ffb0",
       "danger": "#ff4d4d"
-    },
-    "shifts": {
-      "panel": 26,
-      "panel_hv": 44,
-      "border": 58,
-      "muted": 72
     }
   },
   "ocean": {
@@ -23,12 +17,6 @@
       "accent": "#52d6ff",
       "success": "#4ef0b6",
       "danger": "#ff6b6b"
-    },
-    "shifts": {
-      "panel": 24,
-      "panel_hv": 42,
-      "border": 56,
-      "muted": 70
     }
   },
   "ember": {
@@ -39,12 +27,6 @@
       "accent": "#ffb347",
       "success": "#79f0b2",
       "danger": "#ff6a5e"
-    },
-    "shifts": {
-      "panel": 22,
-      "panel_hv": 38,
-      "border": 52,
-      "muted": 66
     }
   },
   "paper": {
@@ -55,12 +37,6 @@
       "accent": "#106d5d",
       "success": "#237a57",
       "danger": "#a93434"
-    },
-    "shifts": {
-      "panel": 18,
-      "panel_hv": 30,
-      "border": 40,
-      "muted": 58
     }
   }
 }
