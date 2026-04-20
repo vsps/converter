@@ -1,15 +1,4 @@
-/* converter.tcss — dark theme for Batch Converter TUI */
-
-$c-bg: #0f0f0f;
-$c-panel: #1a1a1a;
-$c-panel-hv: #252525;
-$c-border: #2a2a2a;
-$c-accent: #e8ff47;
-$c-muted: #555555;
-$c-fg: #e0e0e0;
-$c-fg-dim: #888888;
-$c-danger: #ff4d4d;
-$c-success: #47ffb0;
+/* converter.tcss — Batch Converter TUI */
 
 Screen {
     background: $c-bg;
@@ -43,10 +32,11 @@ SplashScreen {
 
 #header-bar {
     dock: top;
-    height: 1;
+    height: 3;
     background: $c-bg;
     padding: 0 2;
     layout: horizontal;
+    align: left middle;
 }
 #header-bar #title {
     color: $c-accent;
@@ -61,8 +51,20 @@ SplashScreen {
 #header-bar #settings-btn {
     dock: right;
     min-width: 10;
-    background: $c-bg;
-    color: $c-fg-dim;
+    background: $c-panel;
+    color: $c-fg;
+    text-style: bold;
+    border: tall $c-border;
+}
+#header-bar #settings-btn:hover {
+    background: $c-panel-hv;
+    color: $c-accent;
+    border: tall $c-border;
+}
+#header-bar #settings-btn:focus {
+    background: $c-panel-hv;
+    color: $c-accent;
+    border: tall $c-accent;
 }
 
 /* ── Three-column layout ────────────────────────────── */
@@ -419,11 +421,28 @@ RichLog {
 
 SettingsScreen {
     background: $c-bg;
+    layout: vertical;
+    height: 100%;
 }
 SettingsScreen #settings-title {
     color: $c-accent;
     text-style: bold;
-    margin: 1 2;
+    margin: 0 2;
+}
+SettingsScreen #settings-scroll {
+    height: 1fr;
+    padding: 0;
+    margin: 0;
+}
+SettingsScreen #settings-columns {
+    layout: horizontal;
+    height: auto;
+    width: 1fr;
+}
+SettingsScreen #settings-col-left,
+SettingsScreen #settings-col-right {
+    width: 1fr;
+    padding: 0 1;
 }
 SettingsScreen .tool-panel {
     background: $c-panel;
@@ -431,7 +450,7 @@ SettingsScreen .tool-panel {
     border-title-color: $c-accent;
     border-title-style: bold;
     padding: 1 2;
-    margin: 0 2 1 2;
+    margin: 0 1 1 1;
 }
 SettingsScreen .tool-panel .tool-hint {
     color: $c-muted;
@@ -439,7 +458,7 @@ SettingsScreen .tool-panel .tool-hint {
 SettingsScreen .tool-panel .tool-row {
     layout: horizontal;
     height: auto;
-    margin-top: 1;
+    margin-top: 0;
 }
 SettingsScreen .tool-panel .tool-row Input {
     width: 1fr;
@@ -447,7 +466,65 @@ SettingsScreen .tool-panel .tool-row Input {
 SettingsScreen .tool-panel .tool-status {
     color: $c-fg-dim;
     width: auto;
-    margin-left: 1;
+    margin-top: 0;
+}
+SettingsScreen .theme-panel {
+    background: $c-panel;
+    border: solid $c-border;
+    border-title-color: $c-accent;
+    border-title-style: bold;
+    padding: 1 2;
+    margin: 0 1 1 1;
+}
+SettingsScreen .theme-color-row {
+    layout: horizontal;
+    height: auto;
+    margin-top: 1;
+}
+SettingsScreen .section-label {
+    color: $c-muted;
+    text-style: bold;
+    margin-top: 1;
+}
+SettingsScreen .theme-color-row Input {
+    width: 1fr;
+}
+SettingsScreen .theme-key {
+    color: $c-muted;
+    text-style: bold;
+    width: 10;
+    content-align: left middle;
+}
+SettingsScreen .shift-group {
+    margin-top: 1;
+}
+SettingsScreen .shift-control {
+    height: 1;
+    layout: horizontal;
+    margin-top: 1;
+}
+SettingsScreen .shift-label {
+    color: $c-muted;
+    width: 10;
+    content-align: left middle;
+}
+SettingsScreen .shift-control ProgressBar {
+    width: 1fr;
+    padding: 0;
+}
+SettingsScreen .shift-control ProgressBar Bar {
+    color: $c-accent;
+    background: $c-panel-hv;
+}
+SettingsScreen .shift-btn {
+    min-width: 3;
+    width: 3;
+    margin: 0 1;
+}
+SettingsScreen .shift-value {
+    color: $c-fg-dim;
+    width: 5;
+    content-align: right middle;
 }
 SettingsScreen .rebuild-panel {
     background: $c-panel;
@@ -455,7 +532,7 @@ SettingsScreen .rebuild-panel {
     border-title-color: $c-accent;
     border-title-style: bold;
     padding: 1 2;
-    margin: 0 2 1 2;
+    margin: 0 1 1 1;
 }
 SettingsScreen .rebuild-panel .rebuild-status {
     color: $c-fg-dim;

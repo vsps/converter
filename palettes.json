@@ -1,0 +1,66 @@
+{
+  "default": {
+    "label": "Default Lime",
+    "colors": {
+      "bg": "#0f0f0f",
+      "text": "#e0e0e0",
+      "accent": "#e8ff47",
+      "success": "#47ffb0",
+      "danger": "#ff4d4d"
+    },
+    "shifts": {
+      "panel": 26,
+      "panel_hv": 44,
+      "border": 58,
+      "muted": 72
+    }
+  },
+  "ocean": {
+    "label": "Ocean",
+    "colors": {
+      "bg": "#101821",
+      "text": "#dbe7f3",
+      "accent": "#52d6ff",
+      "success": "#4ef0b6",
+      "danger": "#ff6b6b"
+    },
+    "shifts": {
+      "panel": 24,
+      "panel_hv": 42,
+      "border": 56,
+      "muted": 70
+    }
+  },
+  "ember": {
+    "label": "Ember",
+    "colors": {
+      "bg": "#18110f",
+      "text": "#f3e2d6",
+      "accent": "#ffb347",
+      "success": "#79f0b2",
+      "danger": "#ff6a5e"
+    },
+    "shifts": {
+      "panel": 22,
+      "panel_hv": 38,
+      "border": 52,
+      "muted": 66
+    }
+  },
+  "paper": {
+    "label": "Paper",
+    "colors": {
+      "bg": "#f1eadf",
+      "text": "#1d1b17",
+      "accent": "#106d5d",
+      "success": "#237a57",
+      "danger": "#a93434"
+    },
+    "shifts": {
+      "panel": 18,
+      "panel_hv": 30,
+      "border": 40,
+      "muted": 58
+    }
+  }
+}

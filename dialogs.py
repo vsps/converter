@@ -11,14 +11,22 @@ from textual.app import ComposeResult
 from textual.screen import Screen, ModalScreen
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
-    Static, Input, Button, TabbedContent, TabPane, DirectoryTree,
+    Static, Input, Button, Select, TabbedContent, TabPane, DirectoryTree, ProgressBar,
 )
 
 from scanner import (
     probe_tool, build_args_db, load_args_db, save_args_db,
     IMAGE_FORMATS, VIDEO_FORMATS, AUDIO_FORMATS,
 )
-from persistence import save_prefs, get_last_value, set_last_value
+from persistence import (
+    THEME_COLOR_KEYS,
+    THEME_SHIFT_KEYS,
+    get_last_value,
+    load_palettes,
+    resolve_theme_state,
+    save_prefs,
+    set_last_value,
+)
 
 
 # ── Splash Screen ─────────────────────────────────────────────────────────────
@@ -211,6 +219,38 @@ class ArgValueModal(ModalScreen):
         self.dismiss(token)
 
 
+class ShiftControl(Horizontal):
+    """Single-line shift control: label | [-] | ProgressBar | [+] | value%"""
+
+    def __init__(self, shift_key: str, label: str, value: int):
+        super().__init__(id=f"shift-{shift_key}", classes="shift-control")
+        self.shift_key = shift_key
+        self.label = label
+        self.value = max(0, min(100, int(value)))
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.label, classes="shift-label")
+        yield Button("-", id=f"shift-{self.shift_key}-dec", classes="ghost shift-btn")
+        yield ProgressBar(total=100, show_eta=False, show_percentage=False,
+                          id=f"shift-{self.shift_key}-bar")
+        yield Button("+", id=f"shift-{self.shift_key}-inc", classes="ghost shift-btn")
+        yield Static("", id=f"shift-{self.shift_key}-value", classes="shift-value")
+
+    def on_mount(self) -> None:
+        self._refresh()
+
+    def set_value(self, value: int) -> None:
+        self.value = max(0, min(100, int(value)))
+        self._refresh()
+
+    def adjust(self, delta: int) -> None:
+        self.set_value(self.value + delta)
+
+    def _refresh(self) -> None:
+        self.query_one(f"#shift-{self.shift_key}-bar", ProgressBar).progress = self.value
+        self.query_one(f"#shift-{self.shift_key}-value", Static).update(f"{self.value}%")
+
+
 # ── Args Reference Screen ───────────────────────────────────────────────────
 
 class ArgRow(Static):
@@ -359,61 +399,121 @@ class ArgsReferenceScreen(Screen):
 # ── Settings Screen ──────────────────────────────────────────────────────────
 
 class SettingsScreen(Screen):
-    """Tool paths + args DB rebuild."""
+    """Theme, tool paths, and args DB rebuild."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, prefs: dict):
         super().__init__()
         self.prefs = dict(prefs)
+        self.palette_state = resolve_theme_state(self.prefs)
+        self.palettes = self.palette_state["palettes"]
+
+    @staticmethod
+    def _normalize_hex(value: str):
+        text = value.strip().lower()
+        if not text:
+            return None
+        if not text.startswith("#"):
+            text = f"#{text}"
+        if len(text) != 7:
+            return None
+        try:
+            int(text[1:], 16)
+        except ValueError:
+            return None
+        return text
+
+    @staticmethod
+    def _theme_color_label(key: str) -> str:
+        return {
+            "bg": "BG",
+            "text": "TEXT",
+            "accent": "ACCENT",
+            "success": "SUCCESS",
+            "danger": "DANGER",
+        }[key]
+
+    @staticmethod
+    def _shift_label(key: str) -> str:
+        return {
+            "panel": "Panel shift",
+            "panel_hv": "Panel hover shift",
+            "border": "Border shift",
+            "muted": "Muted text shift",
+        }[key]
 
     def compose(self) -> ComposeResult:
         yield Static("SETTINGS", id="settings-title")
+        with VerticalScroll(id="settings-scroll"):
+            with Horizontal(id="settings-columns"):
+                with Vertical(id="settings-col-left"):
+                    theme_panel = Vertical(classes="theme-panel")
+                    theme_panel.border_title = "THEME"
+                    with theme_panel:
+                        yield Static(
+                            "BG drives panel, hover, border, and muted. Luma shifts move down for light BG and up for dark BG.",
+                            classes="tool-hint",
+                        )
+                        yield Select(
+                            [(data["label"], name) for name, data in self.palettes.items()],
+                            value=self.palette_state["palette_name"],
+                            id="theme-palette",
+                        )
+                        yield Static("BASE COLORS", classes="section-label")
+                        for key in THEME_COLOR_KEYS:
+                            with Horizontal(classes="theme-color-row"):
+                                yield Static(self._theme_color_label(key), classes="theme-key")
+                                yield Input(value=self.palette_state["colors"][key], id=f"theme-{key}-input")
+                        yield Static("DERIVED SHIFTS", classes="section-label")
+                        with Vertical(classes="shift-group"):
+                            for key in THEME_SHIFT_KEYS:
+                                yield ShiftControl(key, self._shift_label(key), self.palette_state["shifts"][key])
+                        with Horizontal(classes="btn-row"):
+                            yield Button("Reset Theme", id="theme-reset-btn", classes="ghost")
 
-        # ImageMagick
-        im_panel = Vertical(classes="tool-panel")
-        im_panel.border_title = "IMAGEMAGICK"
-        with im_panel:
-            yield Static("e.g.  magick  or  full path", classes="tool-hint")
-            with Horizontal(classes="tool-row"):
-                yield Input(
-                    value=self.prefs.get("im_exe", "magick"),
-                    id="im-exe-input")
-                yield Button("test", id="im-test-btn", classes="ghost")
-            yield Static("", id="im-status", classes="tool-status")
+                with Vertical(id="settings-col-right"):
+                    im_panel = Vertical(classes="tool-panel")
+                    im_panel.border_title = "IMAGEMAGICK"
+                    with im_panel:
+                        yield Static("e.g.  magick  or  full path", classes="tool-hint")
+                        with Horizontal(classes="tool-row"):
+                            yield Input(
+                                value=self.prefs.get("im_exe", "magick"),
+                                id="im-exe-input")
+                            yield Button("test", id="im-test-btn", classes="ghost")
+                        yield Static("", id="im-status", classes="tool-status")
 
-        # FFmpeg
-        ff_panel = Vertical(classes="tool-panel")
-        ff_panel.border_title = "FFMPEG"
-        with ff_panel:
-            yield Static("e.g.  ffmpeg  or  full path", classes="tool-hint")
-            with Horizontal(classes="tool-row"):
-                yield Input(
-                    value=self.prefs.get("ff_exe", "ffmpeg"),
-                    id="ff-exe-input")
-                yield Button("test", id="ff-test-btn", classes="ghost")
-            yield Static("", id="ff-status", classes="tool-status")
+                    ff_panel = Vertical(classes="tool-panel")
+                    ff_panel.border_title = "FFMPEG"
+                    with ff_panel:
+                        yield Static("e.g.  ffmpeg  or  full path", classes="tool-hint")
+                        with Horizontal(classes="tool-row"):
+                            yield Input(
+                                value=self.prefs.get("ff_exe", "ffmpeg"),
+                                id="ff-exe-input")
+                            yield Button("test", id="ff-test-btn", classes="ghost")
+                        yield Static("", id="ff-status", classes="tool-status")
 
-        # Rebuild
-        rebuild_panel = Vertical(classes="rebuild-panel")
-        rebuild_panel.border_title = "ARGS DATABASE"
-        with rebuild_panel:
-            db = load_args_db()
-            raw_ts = db.get("scanned_at", "never")
-            scanned_at = raw_ts
-            if raw_ts != "never":
-                try:
-                    scanned_at = datetime.fromisoformat(raw_ts).strftime(
-                        "%d %b %Y  %H:%M")
-                except Exception:
-                    pass
-            yield Static(f"last built: {scanned_at}", id="scan-ts")
-            yield Static(
-                "Scans tools and saves all args to converter_args.json",
-                classes="tool-hint")
-            with Horizontal(classes="btn-row"):
-                yield Button("Rebuild Args", id="rebuild-btn")
-            yield Static("", id="rebuild-status", classes="rebuild-status")
+                    rebuild_panel = Vertical(classes="rebuild-panel")
+                    rebuild_panel.border_title = "ARGS DATABASE"
+                    with rebuild_panel:
+                        db = load_args_db()
+                        raw_ts = db.get("scanned_at", "never")
+                        scanned_at = raw_ts
+                        if raw_ts != "never":
+                            try:
+                                scanned_at = datetime.fromisoformat(raw_ts).strftime(
+                                    "%d %b %Y  %H:%M")
+                            except Exception:
+                                pass
+                        yield Static(f"last built: {scanned_at}", id="scan-ts")
+                        yield Static(
+                            "Scans tools and saves all args to converter_args.json",
+                            classes="tool-hint")
+                        with Horizontal(classes="btn-row"):
+                            yield Button("Rebuild Args", id="rebuild-btn")
+                        yield Static("", id="rebuild-status", classes="rebuild-status")
 
         with Horizontal(id="settings-footer"):
             yield Button("SAVE & CLOSE", id="save-btn", classes="primary")
@@ -422,6 +522,26 @@ class SettingsScreen(Screen):
     def on_mount(self) -> None:
         self._probe_tool("im")
         self._probe_tool("ff")
+        self.call_after_refresh(
+            lambda: self._load_palette_into_controls(self.palette_state["palette_name"])
+        )
+
+    def _load_palette_into_controls(self, palette_name: str) -> None:
+        if palette_name not in self.palettes:
+            return
+        palette = self.palettes[palette_name]
+        try:
+            for key in THEME_COLOR_KEYS:
+                self.query_one(f"#theme-{key}-input", Input).value = palette["colors"][key]
+            for key in THEME_SHIFT_KEYS:
+                self.query_one(f"#shift-{key}", ShiftControl).set_value(palette["shifts"][key])
+        except Exception:
+            return
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "theme-palette" and event.value != Select.BLANK:
+            name = str(event.value)
+            self.call_after_refresh(lambda: self._load_palette_into_controls(name))
 
     def _probe_tool(self, which: str):
         inp = self.query_one(f"#{which}-exe-input", Input)
@@ -435,7 +555,15 @@ class SettingsScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn = event.button.id
-        if btn == "im-test-btn":
+        if btn == "theme-reset-btn":
+            palette_value = self.query_one("#theme-palette", Select).value
+            if palette_value != Select.BLANK:
+                self._load_palette_into_controls(str(palette_value))
+        elif btn and btn.startswith("shift-") and btn.endswith(("-dec", "-inc")):
+            _, key, direction = btn.split("-", 2)
+            delta = -5 if direction == "dec" else 5
+            self.query_one(f"#shift-{key}", ShiftControl).adjust(delta)
+        elif btn == "im-test-btn":
             self._probe_tool("im")
         elif btn == "ff-test-btn":
             self._probe_tool("ff")
@@ -475,6 +603,30 @@ class SettingsScreen(Screen):
             self.query_one("#im-exe-input", Input).value.strip() or "magick")
         self.prefs["ff_exe"] = (
             self.query_one("#ff-exe-input", Input).value.strip() or "ffmpeg")
+
+        palette_value = self.query_one("#theme-palette", Select).value
+        palette_name = str(palette_value) if palette_value != Select.BLANK else "default"
+        palette = self.palettes[palette_name]
+
+        theme_colors = {}
+        for key in THEME_COLOR_KEYS:
+            raw = self.query_one(f"#theme-{key}-input", Input).value
+            color = self._normalize_hex(raw)
+            if not color:
+                self.notify(f"Invalid {self._theme_color_label(key)} color", severity="error")
+                return
+            if color != palette["colors"][key]:
+                theme_colors[key] = color
+
+        theme_shifts = {}
+        for key in THEME_SHIFT_KEYS:
+            value = self.query_one(f"#shift-{key}", ShiftControl).value
+            if value != palette["shifts"][key]:
+                theme_shifts[key] = value
+
+        self.prefs["theme_palette"] = palette_name
+        self.prefs["theme_colors"] = theme_colors
+        self.prefs["theme_shifts"] = theme_shifts
         save_prefs(self.prefs)
         self.dismiss(self.prefs)
 

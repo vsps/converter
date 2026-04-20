@@ -30,6 +30,7 @@ from rich.text import Text
 from persistence import (
     load_prefs, save_prefs, format_badge,
     load_presets, save_presets,
+    resolve_theme_tokens,
     IMAGE_FORMATS, VIDEO_FORMATS, AUDIO_FORMATS,
     ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS,
 )
@@ -55,8 +56,12 @@ def _preset_sort_key(p):
 
 
 class ConverterApp(App):
-    CSS_PATH = "converter.tcss"
+    CSS_PATH = ["converter.tcss"]
     TITLE = "Batch File Converter"
+
+    def __init__(self):
+        self.prefs = load_prefs()
+        super().__init__()
 
     BINDINGS = [
         ("ctrl+q", "quit_app", "Quit"),
@@ -169,8 +174,10 @@ class ConverterApp(App):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
+    def get_css_variables(self) -> dict[str, str]:
+        return {**super().get_css_variables(), **resolve_theme_tokens(self.prefs)}
+
     def on_mount(self) -> None:
-        self.prefs = load_prefs()
         self._check_tools()
         self._restore_prefs()
         self._load_user_presets()
@@ -240,6 +247,9 @@ class ConverterApp(App):
             "extra_args":  self.query_one("#extra-args", TextArea).text.strip(),
         })
         save_prefs(self.prefs)
+
+    def _apply_theme(self):
+        self.refresh_css(animate=False)
 
     # ── User presets ──────────────────────────────────────────────────────
 
@@ -541,6 +551,7 @@ class ConverterApp(App):
     def _on_settings_close(self, result) -> None:
         if result:
             self.prefs = result
+            self._apply_theme()
             self._check_tools()
 
     def _open_args_reference(self):
