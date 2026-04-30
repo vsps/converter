@@ -99,6 +99,7 @@ class ConverterApp(App):
                 out_panel = Vertical(classes="panel")
                 out_panel.border_title = "OUTPUT"
                 with out_panel:
+                    yield Checkbox("Output to same folder", False, id="same-folder")
                     with Horizontal(classes="browse-row"):
                         yield Input(placeholder="output folder", id="output-path")
                         yield Button("\U0001F4C4", id="browse-output")
@@ -225,6 +226,9 @@ class ConverterApp(App):
                 self.query_one("#rb-file", RadioButton).value = True
             elif v == "sequence":
                 self.query_one("#rb-seq", RadioButton).value = True
+        if p.get("same_folder"):
+            self.query_one("#same-folder", Checkbox).value = True
+            self._apply_same_folder(True)
         if v := p.get("output_path"):
             self.query_one("#output-path", Input).value = v
         if v := p.get("format"):
@@ -237,12 +241,13 @@ class ConverterApp(App):
 
     def _save_session(self):
         self.prefs.update({
-            "input_source": self.query_one("#input-source", Input).value,
-            "input_mode":   self._get_input_mode(),
-            "output_path": self.query_one("#output-path", Input).value,
-            "format":      self._get_format(),
+            "input_source":  self.query_one("#input-source", Input).value,
+            "input_mode":    self._get_input_mode(),
+            "same_folder":   self.query_one("#same-folder", Checkbox).value,
+            "output_path":   self.query_one("#output-path", Input).value,
+            "format":        self._get_format(),
             "output_template": self.query_one("#output-template", Input).value,
-            "extra_args":  self.query_one("#extra-args", TextArea).text.strip(),
+            "extra_args":    self.query_one("#extra-args", TextArea).text.strip(),
         })
         save_prefs(self.prefs)
 
@@ -465,6 +470,16 @@ class ConverterApp(App):
         if event.radio_set.id == "input-mode":
             self._update_cmd_preview()
 
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if not self._ui_ready:
+            return
+        if event.checkbox.id == "same-folder":
+            self._apply_same_folder(event.value)
+
+    def _apply_same_folder(self, enabled: bool) -> None:
+        self.query_one("#output-path", Input).disabled = enabled
+        self.query_one("#browse-output", Button).disabled = enabled
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id or ""
         if btn_id == "convert-btn":
@@ -642,9 +657,10 @@ class ConverterApp(App):
         out = self.query_one("#output-path", Input).value.strip()
         fmt = self._get_format()
 
+        same_folder = self.query_one("#same-folder", Checkbox).value
         if not inp_raw:
             self.notify("Select an input folder or file", severity="error"); return
-        if not out:
+        if not same_folder and not out:
             self.notify("Set an output folder", severity="error"); return
         if not fmt:
             self.notify("Select an output format", severity="error"); return
@@ -656,7 +672,8 @@ class ConverterApp(App):
         if not inp_path.exists():
             self.notify(f"Input not found: {inp_raw}", severity="error"); return
 
-        Path(out).mkdir(parents=True, exist_ok=True)
+        if not same_folder:
+            Path(out).mkdir(parents=True, exist_ok=True)
         self._save_session()
         self.running = True
         self.query_one("#convert-btn", Button).disabled = True
@@ -681,20 +698,21 @@ class ConverterApp(App):
         self._run_conversion(inp_path, out, fmt, mode,
                              overwrite, skip_same, recurse,
                              output_template, codec, preset_name, extra,
-                             seq_info)
+                             seq_info, same_folder)
 
     @work(exclusive=True, thread=True)
     def _run_conversion(self, inp, out, fmt, mode,
                         overwrite, skip_same, recurse,
                         output_template, codec, preset_name, extra,
-                        seq_info=None):
+                        seq_info=None, same_folder=False):
         worker = get_current_worker()
 
         if mode == "sequence":
             dst_stem = self._resolve_token(output_template,
                                            Path(seq_info["stem_prefix"]), fmt, 0,
                                            codec, preset_name)
-            dst = Path(out) / f"{dst_stem}.{fmt}"
+            out_dir = inp.parent if same_folder else Path(out)
+            dst = out_dir / f"{dst_stem}.{fmt}"
             ff_exe = self._ff_cmd()
             cmd = ([ff_exe, "-y",
                     "-start_number", str(seq_info["start"]),
@@ -793,7 +811,8 @@ class ConverterApp(App):
                 continue
 
             name = self._resolve_token(output_template, src, fmt, i, codec, preset_name)
-            dst = Path(out) / f"{name}.{fmt}"
+            out_dir = src.parent if same_folder else Path(out)
+            dst = out_dir / f"{name}.{fmt}"
 
             if not overwrite and dst.exists():
                 self.call_from_thread(
