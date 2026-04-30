@@ -3,9 +3,33 @@ dialogs.py — SettingsScreen, ArgsReferenceScreen, ArgValueModal,
              BrowseScreen, SplashScreen (Textual).
 """
 
+import ctypes
+import string
 import threading
 from pathlib import Path
 from datetime import datetime
+
+
+def _normalize_path(path_str: str) -> str:
+    """Convert UNC paths back to drive-letter form where a drive mapping exists.
+    Textual's DirectoryTree calls Path.resolve() internally, which on Windows
+    silently converts mapped drive letters to UNC equivalents."""
+    if not path_str.startswith('\\\\'):
+        return path_str
+    try:
+        for letter in string.ascii_uppercase:
+            drive = letter + ':'
+            buf = ctypes.create_unicode_buffer(1024)
+            size = ctypes.c_ulong(1024)
+            ret = ctypes.windll.mpr.WNetGetConnectionW(
+                ctypes.c_wchar_p(drive), buf, ctypes.byref(size))
+            if ret == 0:
+                unc_root = buf.value.rstrip('\\')
+                if path_str.lower().startswith(unc_root.lower()):
+                    return drive + path_str[len(unc_root):]
+    except Exception:
+        pass
+    return path_str
 
 from textual.app import ComposeResult
 from textual.screen import Screen, ModalScreen
@@ -129,14 +153,16 @@ class BrowseScreen(Screen):
 
     def on_directory_tree_directory_selected(
             self, event: DirectoryTree.DirectorySelected) -> None:
-        self.query_one("#browse-input", Input).value = str(event.path)
-        self._selected = str(event.path)
+        path = _normalize_path(str(event.path))
+        self.query_one("#browse-input", Input).value = path
+        self._selected = path
 
     def on_directory_tree_file_selected(
             self, event: DirectoryTree.FileSelected) -> None:
         if self.mode == "file":
-            self.query_one("#browse-input", Input).value = str(event.path)
-            self._selected = str(event.path)
+            path = _normalize_path(str(event.path))
+            self.query_one("#browse-input", Input).value = path
+            self._selected = path
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id

@@ -8,5 +8,10 @@
     "name": "mp4_40K",
     "format": "mp4",
     "args": "-c:v libx264 -crf 23 -preset fast -b:v 40k"
+  },
+  {
+    "name": "2k_jpg",
+    "format": "jpg",
+    "args": "-quality 85 -resize 2048x2048"
   }
 ]

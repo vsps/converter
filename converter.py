@@ -32,7 +32,7 @@ from persistence import (
     load_presets, save_presets,
     resolve_theme_tokens,
     IMAGE_FORMATS, VIDEO_FORMATS, AUDIO_FORMATS,
-    ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS,
+    ALL_FORMATS, ALL_EXTENSIONS, IMAGE_EXTENSIONS, IMAGE_INPUT_FORMATS,
 )
 from scanner import probe_tool
 from dialogs import ArgsReferenceScreen, SettingsScreen, BrowseScreen, SplashScreen
@@ -415,7 +415,7 @@ class ConverterApp(App):
         dst = Path(out) / self._output_name(src, fmt)
         src_ext = src.suffix.lower().lstrip(".")
         use_im = self.has_magick and (
-            src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
+            src_ext in IMAGE_INPUT_FORMATS and fmt in IMAGE_FORMATS)
         short_src = self._short_path(src)
         short_dst = self._short_path(dst)
         exe = Path(self._im_cmd() if use_im else self._ff_cmd()).name
@@ -425,7 +425,7 @@ class ConverterApp(App):
         t = Text()
         t.append(exe, style="bold blue")
         if use_im:
-            t.append(f" file:{short_src}", style="green")
+            t.append(f" {short_src}", style="green")
         else:
             t.append(" -y -i ", style="bold yellow")
             t.append(short_src, style="green")
@@ -593,8 +593,21 @@ class ConverterApp(App):
 
     def _collect_files(self, folder, recurse):
         folder = Path(folder)
-        return sorted(p for p in folder.glob("**/*" if recurse else "*")
-                      if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
+        if recurse:
+            return sorted(p for p in folder.glob("**/*")
+                          if p.is_file() and p.suffix.lower() in ALL_EXTENSIONS)
+        # Use os.scandir for the flat case — pathlib.glob can silently resolve
+        # drive-letter paths to UNC on Windows, breaking network-drive scans.
+        import os
+        try:
+            result = []
+            for entry in os.scandir(str(folder)):
+                if entry.is_file(follow_symlinks=False):
+                    if os.path.splitext(entry.name)[1].lower() in ALL_EXTENSIONS:
+                        result.append(Path(entry.path))
+            return sorted(result)
+        except OSError:
+            return []
 
     def _resolve_sequence(self, file_path: Path):
         m = re.match(r'^(.*?)(\d+)$', file_path.stem)
@@ -731,7 +744,27 @@ class ConverterApp(App):
             files = self._collect_files(inp, recurse)
 
         if not files:
-            self.call_from_thread(self._log, "No compatible files.", "warn")
+            import os
+            inp_str = str(inp)
+            self.call_from_thread(self._log, f"Scanned: {inp_str}", "dim")
+            try:
+                entries   = list(os.scandir(inp_str))
+                all_files = [e for e in entries if e.is_file(follow_symlinks=False)]
+                subdirs   = [e for e in entries if e.is_dir(follow_symlinks=False)]
+                if all_files:
+                    exts = ", ".join(sorted({os.path.splitext(e.name)[1].lower()
+                                             for e in all_files}))
+                    self.call_from_thread(
+                        self._log,
+                        f"No compatible files. Extensions found: {exts}", "warn")
+                elif subdirs and not recurse:
+                    self.call_from_thread(
+                        self._log,
+                        "No files in folder root — enable Include subfolders.", "warn")
+                else:
+                    self.call_from_thread(self._log, "Folder appears empty.", "warn")
+            except OSError as e:
+                self.call_from_thread(self._log, f"Cannot read folder: {e}", "err")
             self.call_from_thread(self._done); return
 
         src_desc = inp.name if mode == "file" else str(inp)
@@ -797,10 +830,10 @@ class ConverterApp(App):
     def _convert_file(self, src, dst, fmt, extra):
         src_ext = src.suffix.lower().lstrip(".")
         use_im = self.has_magick and (
-            src_ext in IMAGE_FORMATS and fmt in IMAGE_FORMATS)
+            src_ext in IMAGE_INPUT_FORMATS and fmt in IMAGE_FORMATS)
         try:
             if use_im:
-                cmd = [self._im_cmd(), f"file:{src}"] + extra + [str(dst)]
+                cmd = [self._im_cmd(), str(src)] + extra + [str(dst)]
             elif self.has_ffmpeg:
                 cmd = [self._ff_cmd(), "-y", "-i", str(src)] + extra + [str(dst)]
             else:

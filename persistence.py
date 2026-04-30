@@ -46,7 +46,9 @@ VIDEO_FORMATS = ["avi", "flv", "mkv", "mov", "mp4", "ts", "webm", "wmv"]
 AUDIO_FORMATS = ["aac", "aiff", "flac", "m4a", "mp3", "ogg", "opus", "wav"]
 ALL_FORMATS   = sorted(IMAGE_FORMATS + VIDEO_FORMATS + AUDIO_FORMATS)
 
-IMAGE_EXTENSIONS = {f".{f}" for f in IMAGE_FORMATS}
+IMAGE_EXTENSIONS = {f".{f}" for f in IMAGE_FORMATS} | {".tif", ".jfif", ".jpe"}
+# Extra input-only aliases (not offered as output formats)
+IMAGE_INPUT_FORMATS = set(IMAGE_FORMATS) | {"tif", "jfif", "jpe"}
 VIDEO_EXTENSIONS = {f".{f}" for f in VIDEO_FORMATS}
 AUDIO_EXTENSIONS = {f".{f}" for f in AUDIO_FORMATS}
 ALL_EXTENSIONS   = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
