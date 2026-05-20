@@ -625,24 +625,34 @@ class ConverterApp(App):
             return []
 
     def _resolve_sequence(self, file_path: Path):
-        m = re.match(r'^(.*?)(\d+)$', file_path.stem)
+        # parse full name — avoids pathlib treating ".0001" as the suffix
+        # when the real extension is hidden/missing.
+        # match: <prefix><digits><ext?>  where ext starts with a letter.
+        m = re.match(r'^(.*?)(\d+)(\.[A-Za-z][A-Za-z0-9]*)?$', file_path.name)
         if not m:
             return None
-        prefix, digits = m.group(1), m.group(2)
+        prefix, digits, ext = m.group(1), m.group(2), m.group(3) or ""
         pad = len(digits)
-        ext = file_path.suffix
-        files = sorted(
-            p for p in file_path.parent.glob(f"*{ext}")
-            if re.match(rf'^{re.escape(prefix)}\d+$', p.stem, re.IGNORECASE)
-        )
-        if not files:
+        parent = file_path.parent
+        file_re = re.compile(rf'^{re.escape(prefix)}(\d+){re.escape(ext)}$',
+                             re.IGNORECASE)
+        matches = []
+        try:
+            for p in parent.iterdir():
+                if not p.is_file():
+                    continue
+                mm = file_re.match(p.name)
+                if mm:
+                    matches.append(int(mm.group(1)))
+        except OSError:
             return None
-        nums = [int(re.search(r'\d+$', p.stem).group()) for p in files]
+        if not matches:
+            return None
         return {
-            "pattern": file_path.parent / f"{prefix}%0{pad}d{ext}",
-            "start":   min(nums),
-            "count":   len(files),
-            "stem_prefix": prefix.rstrip("_"),
+            "pattern": parent / f"{prefix}%0{pad}d{ext}",
+            "start":   min(matches),
+            "count":   len(matches),
+            "stem_prefix": prefix.rstrip("_."),
         }
 
     def _output_name(self, src: Path, fmt: str, index: int = 0) -> str:
